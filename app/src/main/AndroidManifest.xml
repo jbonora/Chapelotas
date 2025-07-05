@@ -1,12 +1,28 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- Permisos existentes -->
     <uses-permission android:name="android.permission.READ_CALENDAR" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Permisos para persistencia nivel WhatsApp -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+
+    <!-- Permisos para algunos fabricantes -->
+    <uses-permission android:name="android.permission.REQUEST_COMPANION_RUN_IN_BACKGROUND" />
+    <uses-permission android:name="android.permission.REQUEST_COMPANION_USE_DATA_IN_BACKGROUND" />
+
     <application
         android:name=".ChapelotasApplication"
         android:allowBackup="true"
@@ -16,33 +32,70 @@
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:theme="@style/Theme.Chapelotas">
+        android:theme="@style/Theme.Chapelotas"
+        android:persistent="true">
+
         <activity
             android:name=".MainActivity"
-            android:exported="true">
+            android:exported="true"
+            android:launchMode="singleTop">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
-
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-        <!-- Servicio de notificaciones persistente -->
+
+        <!-- Servicio principal ultra-persistente -->
         <service
             android:name=".data.notifications.ChapelotasNotificationService"
             android:enabled="true"
             android:exported="false"
-            android:foregroundServiceType="dataSync" />
+            android:foregroundServiceType="dataSync"
+            android:stopWithTask="false"
+            android:process=":chapelotas_service">
+            <intent-filter android:priority="1000">
+                <action android:name="com.chapelotas.START_SERVICE" />
+            </intent-filter>
+        </service>
 
-        <!-- Actividad de alerta crítica -->
+        <!-- Receiver para inicio con boot -->
+        <receiver
+            android:name=".data.notifications.BootReceiver"
+            android:enabled="true"
+            android:exported="true"
+            android:permission="android.permission.RECEIVE_BOOT_COMPLETED">
+            <intent-filter android:priority="1000">
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="com.htc.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="android.intent.action.REBOOT" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Receiver para reiniciar servicio -->
+        <receiver
+            android:name=".data.notifications.RestartServiceReceiver"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.chapelotas.RESTART_SERVICE" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Receiver para acciones de notificación (ya existente) -->
+        <receiver
+            android:name=".data.notifications.NotificationActionReceiver"
+            android:exported="false" />
+
+        <!-- Actividad de alerta crítica (ya existente) -->
         <activity
             android:name=".presentation.ui.CriticalAlertActivity"
             android:excludeFromRecents="true"
             android:launchMode="singleTask"
             android:showOnLockScreen="true"
             android:theme="@style/Theme.Chapelotas.CriticalAlert" />
-        <receiver
-            android:name=".data.notifications.NotificationActionReceiver"
-            android:exported="false" />
+
     </application>
 
 </manifest>

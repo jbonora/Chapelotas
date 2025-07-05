@@ -1,4 +1,5 @@
 package com.chapelotas.app.data.notifications
+
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -131,155 +132,16 @@ class NotificationRepositoryImpl @Inject constructor(
     }
 
     override suspend fun showImmediateNotification(notification: ChapelotasNotification) {
-        // Determinar el canal según la prioridad
-        val channelId = when (notification.priority) {
-            NotificationPriority.CRITICAL -> CHANNEL_CRITICAL
-            NotificationPriority.HIGH -> CHANNEL_CRITICAL
-            else -> CHANNEL_GENERAL
-        }
-
-        // Construir notificación estilo Calendar
-        val builder = NotificationCompat.Builder(context, channelId)
-            .setSmallIcon(R.drawable.ic_notification)
-            .setPriority(
-                when (notification.priority) {
-                    NotificationPriority.CRITICAL -> NotificationCompat.PRIORITY_HIGH
-                    NotificationPriority.HIGH -> NotificationCompat.PRIORITY_HIGH
-                    NotificationPriority.NORMAL -> NotificationCompat.PRIORITY_DEFAULT
-                    NotificationPriority.LOW -> NotificationCompat.PRIORITY_LOW
-                }
-            )
-
-        // Configurar según el tipo de notificación
         when (notification.type) {
             NotificationType.CRITICAL_ALERT -> {
-                // Para críticos, seguir usando la pantalla completa
+                // Las críticas siguen usando la pantalla completa
                 showCriticalAlert(notification)
-                return
             }
-
-            NotificationType.EVENT_REMINDER,
-            NotificationType.DAILY_SUMMARY,
-            NotificationType.TOMORROW_SUMMARY -> {
-                configureEventNotification(builder, notification)
-            }
-
             else -> {
-                configureStandardNotification(builder, notification)
+                // Todas las demás usan estilo Calendar
+                showCalendarStyleNotification(notification)
             }
         }
-
-        // Mostrar la notificación
-        if (notificationManager.areNotificationsEnabled()) {
-            notificationManager.notify(
-                notification.eventId.toInt(), // Usar eventId para agrupar por evento
-                builder.build()
-            )
-        }
-    }
-
-    private fun configureEventNotification(
-        builder: NotificationCompat.Builder,
-        notification: ChapelotasNotification
-    ) {
-        val timeText = getTimeText(notification)
-
-        // Buscar el título del evento en el mensaje (hacky pero funciona por ahora)
-        val lines = notification.message.lines()
-        val titulo = lines.firstOrNull() ?: "Evento"
-        val detalles = lines.drop(1).joinToString(" ")
-
-        builder
-            // Contenido principal
-            .setContentTitle(titulo)
-            .setContentText(timeText)
-            .setSubText("Chapelotas")
-
-            // Estilo expandible
-            .setStyle(NotificationCompat.BigTextStyle()
-                .bigText(notification.message)
-                .setSummaryText(timeText)
-            )
-
-            // Acciones
-            .addAction(
-                R.drawable.ic_notification, // Por ahora usar el mismo ícono
-                "POSPONER",
-                createSnoozePendingIntent(notification)
-            )
-            .addAction(
-                R.drawable.ic_notification,
-                "CERRAR",
-                createDismissPendingIntent(notification)
-            )
-
-            // Comportamiento
-            .setAutoCancel(false)
-            .setOnlyAlertOnce(true)
-            .setShowWhen(true)
-            .setWhen(System.currentTimeMillis())
-            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-
-            // Intent al tocar
-            .setContentIntent(createOpenAppIntent())
-    }
-
-    private fun getTimeText(notification: ChapelotasNotification): String {
-        val now = LocalDateTime.now()
-        val eventTime = notification.scheduledTime
-
-        return when {
-            eventTime.isBefore(now) -> {
-                val minutes = java.time.Duration.between(eventTime, now).toMinutes()
-                "hace $minutes min"
-            }
-            eventTime.isAfter(now) -> {
-                val minutes = java.time.Duration.between(now, eventTime).toMinutes()
-                "en $minutes min"
-            }
-            else -> "ahora"
-        }
-    }
-
-    private fun createSnoozePendingIntent(notification: ChapelotasNotification): PendingIntent {
-        val intent = Intent(context, NotificationActionReceiver::class.java).apply {
-            action = "SNOOZE"
-            putExtra("notification_id", notification.id)
-        }
-
-        return PendingIntent.getBroadcast(
-            context,
-            notification.id.hashCode(),
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-    }
-
-    private fun createDismissPendingIntent(notification: ChapelotasNotification): PendingIntent {
-        val intent = Intent(context, NotificationActionReceiver::class.java).apply {
-            action = "DISMISS"
-            putExtra("notification_id", notification.id)
-        }
-
-        return PendingIntent.getBroadcast(
-            context,
-            notification.id.hashCode() + 1,
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-    }
-
-    private fun createOpenAppIntent(): PendingIntent {
-        val intent = Intent(context, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-        }
-
-        return PendingIntent.getActivity(
-            context,
-            0,
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
     }
 
     override suspend fun isNotificationServiceRunning(): Boolean {
@@ -299,6 +161,117 @@ class NotificationRepositoryImpl @Inject constructor(
     override suspend fun stopNotificationService() {
         val intent = Intent(context, ChapelotasNotificationService::class.java)
         context.stopService(intent)
+    }
+
+    /**
+     * Notificación estilo Google Calendar
+     */
+    private fun showCalendarStyleNotification(notification: ChapelotasNotification) {
+        val channelId = when (notification.priority) {
+            NotificationPriority.HIGH, NotificationPriority.CRITICAL -> CHANNEL_CRITICAL
+            else -> CHANNEL_GENERAL
+        }
+
+        // Extraer información del mensaje
+        val lines = notification.message.lines()
+        val titulo = lines.firstOrNull() ?: "Recordatorio"
+
+        // Calcular tiempo relativo
+        val now = LocalDateTime.now()
+        val minutesUntil = Duration.between(now, notification.scheduledTime).toMinutes()
+
+        val timeText = when {
+            minutesUntil <= 0 -> "ahora"
+            minutesUntil < 60 -> "en $minutesUntil min"
+            else -> "en ${minutesUntil / 60}h ${minutesUntil % 60}min"
+        }
+
+        // Intent para abrir la app
+        val openAppIntent = PendingIntent.getActivity(
+            context,
+            notification.id.hashCode(),
+            Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        // Intent para posponer
+        val snoozeIntent = PendingIntent.getBroadcast(
+            context,
+            notification.id.hashCode() + 1,
+            Intent(context, NotificationActionReceiver::class.java).apply {
+                action = "SNOOZE"
+                putExtra("notification_id", notification.id)
+                putExtra("event_id", notification.eventId)
+            },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        // Intent para descartar
+        val dismissIntent = PendingIntent.getBroadcast(
+            context,
+            notification.id.hashCode() + 2,
+            Intent(context, NotificationActionReceiver::class.java).apply {
+                action = "DISMISS"
+                putExtra("notification_id", notification.id)
+                putExtra("event_id", notification.eventId)
+            },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        // Construir notificación estilo Calendar
+        val builder = NotificationCompat.Builder(context, channelId)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle(titulo)
+            .setContentText(timeText)
+            .setSubText("Calendario")
+            .setStyle(
+                NotificationCompat.BigTextStyle()
+                    .bigText(notification.message)
+                    .setSummaryText(timeText)
+            )
+            .setPriority(
+                when (notification.priority) {
+                    NotificationPriority.CRITICAL, NotificationPriority.HIGH ->
+                        NotificationCompat.PRIORITY_HIGH
+                    NotificationPriority.NORMAL ->
+                        NotificationCompat.PRIORITY_DEFAULT
+                    NotificationPriority.LOW ->
+                        NotificationCompat.PRIORITY_LOW
+                }
+            )
+            .setCategory(NotificationCompat.CATEGORY_EVENT)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setAutoCancel(false)
+            .setOnlyAlertOnce(true)
+            .setShowWhen(true)
+            .setWhen(System.currentTimeMillis())
+            .setContentIntent(openAppIntent)
+            .addAction(
+                android.R.drawable.ic_menu_recent_history,
+                "Posponer",
+                snoozeIntent
+            )
+            .addAction(
+                android.R.drawable.checkbox_on_background,
+                "Listo",
+                dismissIntent
+            )
+            .setVibrate(longArrayOf(0, 200, 100, 200))
+            .setLights(android.graphics.Color.BLUE, 1000, 1000)
+
+        // Para Android 8+ agregar badge
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            builder.setBadgeIconType(NotificationCompat.BADGE_ICON_SMALL)
+        }
+
+        if (notificationManager.areNotificationsEnabled()) {
+            notificationManager.notify(
+                notification.eventId.toInt(),
+                builder.build()
+            )
+        }
     }
 
     /**
@@ -342,65 +315,17 @@ class NotificationRepositoryImpl @Inject constructor(
     }
 
     /**
-     * Muestra una notificación estándar
+     * Muestra una alerta crítica (pantalla completa)
      */
-    private fun showStandardNotification(notification: ChapelotasNotification) {
-        val intent = Intent(context, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-            putExtra("notification_id", notification.id)
-        }
-
-        val pendingIntent = PendingIntent.getActivity(
-            context,
-            notification.id.hashCode(),
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-
-        val builder = NotificationCompat.Builder(context, CHANNEL_GENERAL)
-            .setSmallIcon(R.drawable.ic_notification) // Necesitaremos crear este ícono
-            .setContentTitle("Chapelotas")
-            .setContentText(notification.message)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(notification.message))
-            .setPriority(mapPriority(notification.priority))
-            .setContentIntent(pendingIntent)
-            .setAutoCancel(true)
-            .setDefaults(NotificationCompat.DEFAULT_ALL)
-
-        notificationManager.notify(notificationIdCounter++, builder.build())
-    }
-
-    /**
-     * Muestra una notificación crítica (pantalla completa)
-     */
-    private fun showCriticalNotification(notification: ChapelotasNotification) {
-        val fullScreenIntent = Intent(context, CriticalAlertActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_USER_ACTION
-            putExtra("notification_id", notification.id)
+    private fun showCriticalAlert(notification: ChapelotasNotification) {
+        val intent = Intent(context, CriticalAlertActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                    Intent.FLAG_ACTIVITY_SINGLE_TOP
             putExtra("message", notification.message)
+            putExtra("event_id", notification.eventId)
         }
-
-        val fullScreenPendingIntent = PendingIntent.getActivity(
-            context,
-            notification.id.hashCode(),
-            fullScreenIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-
-        val builder = NotificationCompat.Builder(context, CHANNEL_CRITICAL)
-            .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle("🚨 ALERTA CRÍTICA")
-            .setContentText(notification.message)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(notification.message))
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setCategory(NotificationCompat.CATEGORY_ALARM)
-            .setFullScreenIntent(fullScreenPendingIntent, true)
-            .setAutoCancel(false)
-            .setOngoing(true)
-            .setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM))
-            .setVibrate(longArrayOf(0, 1000, 500, 1000, 500, 1000))
-
-        notificationManager.notify(notificationIdCounter++, builder.build())
+        context.startActivity(intent)
     }
 
     /**
@@ -408,18 +333,6 @@ class NotificationRepositoryImpl @Inject constructor(
      */
     private fun calculateDelay(scheduledTime: LocalDateTime): Long {
         return Duration.between(LocalDateTime.now(), scheduledTime).toMillis()
-    }
-
-    /**
-     * Mapea la prioridad del dominio a la prioridad de Android
-     */
-    private fun mapPriority(priority: NotificationPriority): Int {
-        return when (priority) {
-            NotificationPriority.LOW -> NotificationCompat.PRIORITY_LOW
-            NotificationPriority.NORMAL -> NotificationCompat.PRIORITY_DEFAULT
-            NotificationPriority.HIGH -> NotificationCompat.PRIORITY_HIGH
-            NotificationPriority.CRITICAL -> NotificationCompat.PRIORITY_MAX
-        }
     }
 
     /**
@@ -434,28 +347,5 @@ class NotificationRepositoryImpl @Inject constructor(
      */
     private fun removeFromNotificationsList(notificationId: String) {
         _notificationsFlow.value = _notificationsFlow.value.filter { it.id != notificationId }
-    }
-    private fun configureStandardNotification(
-        builder: NotificationCompat.Builder,
-        notification: ChapelotasNotification
-    ) {
-        builder
-            .setContentTitle("Chapelotas")
-            .setContentText(notification.message)
-            .setStyle(NotificationCompat.BigTextStyle()
-                .bigText(notification.message)
-            )
-            .setAutoCancel(true)
-            .setContentIntent(createOpenAppIntent())
-    }
-    private fun showCriticalAlert(notification: ChapelotasNotification) {
-        val intent = Intent(context, CriticalAlertActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or
-                    Intent.FLAG_ACTIVITY_CLEAR_TOP or
-                    Intent.FLAG_ACTIVITY_SINGLE_TOP
-            putExtra("message", notification.message)
-            putExtra("event_id", notification.eventId)
-        }
-        context.startActivity(intent)
     }
 }

@@ -1,13 +1,29 @@
 package com.chapelotas.app
 
+// Imports de Android
 import android.Manifest
+import android.app.AlertDialog
+import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
+import android.provider.Settings
+import android.util.Log
+
+// Imports de AndroidX
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.annotation.RequiresApi
+import androidx.lifecycle.lifecycleScope  // ← ESTE ES EL QUE FALTABA
+
+// Imports de Compose
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -24,33 +40,50 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+
+// Imports de tu app
 import com.chapelotas.app.data.notifications.ChapelotasNotificationService
 import com.chapelotas.app.domain.entities.CalendarEvent
+import com.chapelotas.app.domain.entities.EventoConNotificaciones
+import com.chapelotas.app.domain.entities.MasterPlan
 import com.chapelotas.app.presentation.viewmodels.MainViewModel
 import com.chapelotas.app.presentation.viewmodels.MainUiState
+import com.chapelotas.app.presentation.viewmodels.CalendarMonitorViewModel
 import com.chapelotas.app.ui.theme.ChapelotasTheme
+
+// Imports de Dagger/Hilt
 import dagger.hilt.android.AndroidEntryPoint
+
+// Imports de Kotlin
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.time.format.DateTimeFormatter
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
 
     private val viewModel: MainViewModel by viewModels()
+    private val calendarMonitorViewModel: CalendarMonitorViewModel by viewModels()
+
+    private var hasCheckedBatteryOptimization = false
+    private var hasCheckedHuaweiSettings = false
 
     private val calendarPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { isGranted ->
         if (isGranted) {
             viewModel.onPermissionsGranted()
+            // Iniciar el mono automáticamente cuando se dan permisos
+            calendarMonitorViewModel.iniciarDia()
+
+            // Después de permisos de calendario, verificar batería
+            checkBatteryOptimization()
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-
-        // Iniciar servicio de notificaciones al abrir la app
-        startService(Intent(this, ChapelotasNotificationService::class.java))
 
         setContent {
             ChapelotasTheme {
@@ -59,11 +92,33 @@ class MainActivity : ComponentActivity() {
                 val dailySummary by viewModel.dailySummary.collectAsStateWithLifecycle()
                 val tomorrowSummary by viewModel.tomorrowSummary.collectAsStateWithLifecycle()
 
+                // Estados del monitor
+                val isMonitoring by calendarMonitorViewModel.isMonitoring.collectAsStateWithLifecycle()
+                val currentPlan by calendarMonitorViewModel.currentPlan.collectAsStateWithLifecycle()
+
+                // Iniciar el mono automáticamente si tenemos permisos
+                LaunchedEffect(uiState.requiresPermissions) {
+                    if (!uiState.requiresPermissions && !isMonitoring) {
+                        delay(1000) // Pequeña espera para que todo se inicialice
+                        calendarMonitorViewModel.iniciarDia()
+                    }
+                }
+
+                // Verificar optimizaciones después de tener permisos
+                LaunchedEffect(uiState.requiresPermissions) {
+                    if (!uiState.requiresPermissions && !hasCheckedBatteryOptimization) {
+                        delay(2000) // Esperar un poco más
+                        checkBatteryOptimization()
+                    }
+                }
+
                 MainScreen(
                     uiState = uiState,
                     todayEvents = todayEvents,
                     dailySummary = dailySummary,
                     tomorrowSummary = tomorrowSummary,
+                    isMonitoring = isMonitoring,
+                    currentPlan = currentPlan,
                     onRequestPermissions = {
                         calendarPermissionLauncher.launch(Manifest.permission.READ_CALENDAR)
                     },
@@ -71,8 +126,169 @@ class MainActivity : ComponentActivity() {
                     onLoadTomorrowSummary = viewModel::loadTomorrowSummary,
                     onScheduleNotifications = viewModel::scheduleNotifications,
                     onToggleEventCritical = viewModel::toggleEventCritical,
-                    onDismissError = viewModel::clearError
+                    onDismissError = viewModel::clearError,
+                    onUpdateEventDistance = calendarMonitorViewModel::actualizarEvento
                 )
+            }
+        }
+    }
+
+    /**
+     * Verificar si estamos excluidos de optimización de batería
+     */
+    private fun checkBatteryOptimization() {
+        if (hasCheckedBatteryOptimization) return
+        hasCheckedBatteryOptimization = true
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+            val packageName = packageName
+
+            if (!pm.isIgnoringBatteryOptimizations(packageName)) {
+                // Mostrar diálogo explicativo
+                AlertDialog.Builder(this)
+                    .setTitle("🔋 Permiso Importante")
+                    .setMessage(
+                        "Para que Chapelotas funcione correctamente y no te pierdas ningún evento, " +
+                                "necesita estar excluido de la optimización de batería.\n\n" +
+                                "Esto NO afectará significativamente tu batería."
+                    )
+                    .setPositiveButton("Configurar") { _, _ ->
+                        requestBatteryOptimization()
+                    }
+                    .setNegativeButton("Ahora no") { _, _ ->
+                        // En Huawei es especialmente importante
+                        if (Build.MANUFACTURER.lowercase() == "huawei") {
+                            checkHuaweiSpecificSettings()
+                        }
+                    }
+                    .setCancelable(false)
+                    .show()
+            } else {
+                // Ya tenemos permiso de batería, verificar Huawei
+                if (Build.MANUFACTURER.lowercase() == "huawei") {
+                    checkHuaweiSpecificSettings()
+                }
+            }
+        }
+    }
+
+    /**
+     * Llevar al usuario a la configuración de optimización de batería
+     */
+    @RequiresApi(Build.VERSION_CODES.M)
+    private fun requestBatteryOptimization() {
+        val intent = Intent().apply {
+            action = Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
+            data = Uri.parse("package:$packageName")
+        }
+
+        try {
+            startActivity(intent)
+            // Después de batería, verificar Huawei
+            if (Build.MANUFACTURER.lowercase() == "huawei") {
+                lifecycleScope.launch {
+                    delay(1000)
+                    checkHuaweiSpecificSettings()
+                }
+            }
+        } catch (e: Exception) {
+            // Si falla, abrir configuración general de batería
+            val fallbackIntent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+            startActivity(fallbackIntent)
+        }
+    }
+
+    /**
+     * Configuración específica para Huawei
+     */
+    private fun checkHuaweiSpecificSettings() {
+        if (hasCheckedHuaweiSettings) return
+        hasCheckedHuaweiSettings = true
+
+        AlertDialog.Builder(this)
+            .setTitle("📱 Configuración Huawei")
+            .setMessage(
+                "Huawei requiere pasos adicionales para que Chapelotas funcione perfectamente:\n\n" +
+                        "1. Inicio automático\n" +
+                        "2. Ejecución en segundo plano\n" +
+                        "3. Bloqueo de aplicaciones\n\n" +
+                        "¿Deseas configurarlo ahora? (Muy recomendado)"
+            )
+            .setPositiveButton("Configurar") { _, _ ->
+                openHuaweiSettings()
+            }
+            .setNegativeButton("Omitir") { _, _ ->
+                // Mostrar advertencia
+                AlertDialog.Builder(this)
+                    .setTitle("⚠️ Advertencia")
+                    .setMessage(
+                        "Sin esta configuración, Huawei podría cerrar Chapelotas y " +
+                                "podrías perderte notificaciones importantes.\n\n" +
+                                "Puedes configurarlo luego desde Ajustes → Apps → Chapelotas"
+                    )
+                    .setPositiveButton("Entendido", null)
+                    .show()
+            }
+            .show()
+    }
+
+    /**
+     * Abrir configuración específica de Huawei
+     */
+    private fun openHuaweiSettings() {
+        try {
+            // Intentar abrir gestor de inicio automático
+            val intent = Intent().apply {
+                component = ComponentName(
+                    "com.huawei.systemmanager",
+                    "com.huawei.systemmanager.startupmgr.ui.StartupNormalAppListActivity"
+                )
+            }
+            startActivity(intent)
+
+            // Mostrar instrucciones
+            AlertDialog.Builder(this)
+                .setTitle("📋 Instrucciones Huawei")
+                .setMessage(
+                    "1. Busca 'Chapelotas' en la lista\n" +
+                            "2. Activa 'Permitir inicio automático'\n" +
+                            "3. Vuelve y ve a 'Batería' → 'Inicio de aplicaciones'\n" +
+                            "4. Busca 'Chapelotas' y selecciona 'Gestión manual'\n" +
+                            "5. Activa todas las opciones"
+                )
+                .setPositiveButton("Entendido", null)
+                .show()
+
+        } catch (e: Exception) {
+            try {
+                // Plan B: Configuración de optimización de batería de Huawei
+                val intent = Intent().apply {
+                    component = ComponentName(
+                        "com.huawei.systemmanager",
+                        "com.huawei.systemmanager.optimize.process.ProtectActivity"
+                    )
+                }
+                startActivity(intent)
+            } catch (e2: Exception) {
+                // Plan C: Abrir configuración general de la app
+                val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                    data = Uri.parse("package:$packageName")
+                }
+                startActivity(intent)
+
+                // Mostrar mensaje de ayuda
+                AlertDialog.Builder(this)
+                    .setTitle("ℹ️ Configuración Manual")
+                    .setMessage(
+                        "Ve a:\n" +
+                                "1. Batería → Inicio de aplicaciones\n" +
+                                "2. Busca Chapelotas\n" +
+                                "3. Selecciona 'Gestión manual'\n" +
+                                "4. Activa todas las opciones"
+                    )
+                    .setPositiveButton("OK", null)
+                    .show()
             }
         }
     }
@@ -85,12 +301,15 @@ fun MainScreen(
     todayEvents: List<CalendarEvent>,
     dailySummary: String,
     tomorrowSummary: String,
+    isMonitoring: Boolean,
+    currentPlan: MasterPlan?,
     onRequestPermissions: () -> Unit,
     onLoadDailySummary: () -> Unit,
     onLoadTomorrowSummary: () -> Unit,
     onScheduleNotifications: (Boolean) -> Unit,
     onToggleEventCritical: (Long, Boolean) -> Unit,
-    onDismissError: () -> Unit
+    onDismissError: () -> Unit,
+    onUpdateEventDistance: (String, Boolean, String) -> Unit
 ) {
     var showTomorrowSummary by remember { mutableStateOf(false) }
     var isSarcasticMode by remember { mutableStateOf(false) }
@@ -99,16 +318,25 @@ fun MainScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    Text(
-                        "🔔 Chapelotas",
-                        fontWeight = FontWeight.Bold
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("🔔 Chapelotas", fontWeight = FontWeight.Bold)
+                        // Indicador de estado siempre visible
+                        Spacer(Modifier.width(8.dp))
+                        Badge(
+                            containerColor = if (isMonitoring) Color.Green else Color.Gray
+                        ) {
+                            Text(
+                                if (isMonitoring) "🐵" else "💤",
+                                fontSize = 10.sp
+                            )
+                        }
+                    }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.primaryContainer
                 ),
                 actions = {
-                    // Switch para modo sarcástico
+                    // Switch modo sarcástico
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.padding(end = 8.dp)
@@ -152,6 +380,55 @@ fun MainScreen(
                         contentPadding = PaddingValues(16.dp),
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
+                        // Card de estado del sistema - Siempre visible
+                        item {
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = if (isMonitoring)
+                                        MaterialTheme.colorScheme.primaryContainer
+                                    else
+                                        MaterialTheme.colorScheme.errorContainer
+                                )
+                            ) {
+                                Column(modifier = Modifier.padding(16.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Text(
+                                            if (isMonitoring) "🐵 Mono Vigilando" else "⚠️ Mono Activándose...",
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Text(
+                                            "Próximo checkeo: ${currentPlan?.proximoCheckeo ?: "--:--"}",
+                                            style = MaterialTheme.typography.bodySmall
+                                        )
+                                    }
+
+                                    currentPlan?.eventosCriticosPendientes?.let { criticos ->
+                                        if (criticos.isNotEmpty()) {
+                                            Spacer(Modifier.height(8.dp))
+                                            Text(
+                                                "⚠️ Eventos críticos pendientes: ${criticos.size}",
+                                                color = MaterialTheme.colorScheme.error,
+                                                style = MaterialTheme.typography.bodySmall
+                                            )
+                                        }
+                                    }
+
+                                    // Mostrar si el plan está cargado
+                                    if (currentPlan != null) {
+                                        Spacer(Modifier.height(4.dp))
+                                        Text(
+                                            "📅 ${currentPlan.eventosHoy.size} eventos monitoreados",
+                                            style = MaterialTheme.typography.bodySmall
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
                         // Botones de resumen
                         item {
                             Row(
@@ -216,21 +493,6 @@ fun MainScreen(
                             }
                         }
 
-                        // Botón programar notificaciones
-                        item {
-                            Button(
-                                onClick = { onScheduleNotifications(false) },
-                                modifier = Modifier.fillMaxWidth(),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = MaterialTheme.colorScheme.primary
-                                )
-                            ) {
-                                Icon(Icons.Default.Notifications, contentDescription = null)
-                                Spacer(Modifier.width(8.dp))
-                                Text("Programar Notificaciones del Día")
-                            }
-                        }
-
                         // Título eventos
                         if (todayEvents.isNotEmpty()) {
                             item {
@@ -245,10 +507,18 @@ fun MainScreen(
 
                         // Lista de eventos
                         items(todayEvents) { event ->
-                            EventCard(
+                            EventCardEnhanced(
                                 event = event,
+                                planEvent = currentPlan?.eventosHoy?.find { it.id == event.id.toString() },
                                 onToggleCritical = {
                                     onToggleEventCritical(event.id, !event.isCritical)
+                                },
+                                onUpdateDistance = { distance ->
+                                    onUpdateEventDistance(
+                                        event.id.toString(),
+                                        event.isCritical,
+                                        distance
+                                    )
                                 }
                             )
                         }
@@ -262,12 +532,26 @@ fun MainScreen(
                                         containerColor = MaterialTheme.colorScheme.surfaceVariant
                                     )
                                 ) {
-                                    Text(
-                                        text = "🎉 ¡No tenés eventos hoy!",
+                                    Column(
                                         modifier = Modifier.padding(32.dp),
-                                        textAlign = TextAlign.Center,
-                                        style = MaterialTheme.typography.bodyLarge
-                                    )
+                                        horizontalAlignment = Alignment.CenterHorizontally
+                                    ) {
+                                        Text(
+                                            text = "🎉 ¡No tenés eventos hoy!",
+                                            textAlign = TextAlign.Center,
+                                            style = MaterialTheme.typography.bodyLarge
+                                        )
+                                        Spacer(Modifier.height(8.dp))
+                                        Text(
+                                            text = if (isMonitoring)
+                                                "El mono sigue vigilando por si aparece algo 🐵"
+                                            else
+                                                "Activando vigilancia...",
+                                            textAlign = TextAlign.Center,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -292,6 +576,184 @@ fun MainScreen(
     }
 }
 
+// ... El resto del código sigue igual (EventCardEnhanced, EventCard, PermissionRequestScreen)
+// Los incluyo por completitud:
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun EventCardEnhanced(
+    event: CalendarEvent,
+    planEvent: EventoConNotificaciones?,
+    onToggleCritical: () -> Unit,
+    onUpdateDistance: (String) -> Unit
+) {
+    val timeFormatter = DateTimeFormatter.ofPattern("HH:mm")
+    var showDistanceDialog by remember { mutableStateOf(false) }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = when {
+                event.isCritical -> Color(0xFFFFEBEE)
+                planEvent?.conflicto != null -> Color(0xFFFFF3E0) // Amarillo si hay conflicto
+                else -> MaterialTheme.colorScheme.surface
+            }
+        )
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            // Fila principal
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    // Hora y título
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (event.isCritical) {
+                            Text("🚨 ", fontSize = 20.sp)
+                        }
+                        Text(
+                            text = event.startTime.format(timeFormatter),
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Text(" - ")
+                        Text(
+                            text = event.title,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+
+                    // Ubicación con chip de distancia
+                    event.location?.let {
+                        Row(
+                            modifier = Modifier.padding(top = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "📍 $it",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+
+                            planEvent?.distancia?.let { dist ->
+                                Spacer(Modifier.width(8.dp))
+                                AssistChip(
+                                    onClick = { showDistanceDialog = true },
+                                    label = {
+                                        Text(
+                                            when(dist) {
+                                                "lejos" -> "🚗 Lejos"
+                                                "cerca" -> "🚶 Cerca"
+                                                else -> "🏢 En la ofi"
+                                            },
+                                            style = MaterialTheme.typography.labelSmall
+                                        )
+                                    },
+                                    modifier = Modifier.height(24.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    // Duración y avisos
+                    Row(
+                        modifier = Modifier.padding(top = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = "⏱️ ${event.durationInMinutes} min",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+
+                        planEvent?.avisosSugeridos?.let { avisos ->
+                            Text(
+                                text = "🔔 ${avisos.joinToString(", ")} min antes",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    // Mostrar conflicto si existe
+                    planEvent?.conflicto?.let { conflicto ->
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 8.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.errorContainer
+                            )
+                        ) {
+                            Text(
+                                text = "⚠️ ${conflicto.mensaje}",
+                                modifier = Modifier.padding(8.dp),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                        }
+                    }
+                }
+
+                // Botón crítico
+                IconButton(
+                    onClick = onToggleCritical,
+                    colors = IconButtonDefaults.iconButtonColors(
+                        containerColor = if (event.isCritical)
+                            MaterialTheme.colorScheme.error
+                        else
+                            MaterialTheme.colorScheme.secondaryContainer
+                    )
+                ) {
+                    Icon(
+                        Icons.Default.Warning,
+                        contentDescription = if (event.isCritical) "Quitar crítico" else "Marcar crítico",
+                        tint = if (event.isCritical)
+                            MaterialTheme.colorScheme.onError
+                        else
+                            MaterialTheme.colorScheme.onSecondaryContainer
+                    )
+                }
+            }
+        }
+    }
+
+    // Dialog para cambiar distancia
+    if (showDistanceDialog) {
+        AlertDialog(
+            onDismissRequest = { showDistanceDialog = false },
+            title = { Text("¿Qué tan lejos está?") },
+            text = {
+                Column {
+                    listOf(
+                        "en la ofi" to "🏢 En la oficina",
+                        "cerca" to "🚶 Cerca (caminando)",
+                        "lejos" to "🚗 Lejos (necesito transporte)"
+                    ).forEach { (value, label) ->
+                        TextButton(
+                            onClick = {
+                                onUpdateDistance(value)
+                                showDistanceDialog = false
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(label)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showDistanceDialog = false }) {
+                    Text("Cancelar")
+                }
+            }
+        )
+    }
+}
+
+// EventCard original para compatibilidad (cuando no hay plan)
 @Composable
 fun EventCard(
     event: CalendarEvent,

@@ -13,23 +13,25 @@ class NotificationActionReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
         val notificationId = intent.getStringExtra("notification_id") ?: return
+        val eventId = intent.getLongExtra("event_id", -1)
         val notificationManager = NotificationManagerCompat.from(context)
 
         when (intent.action) {
             "SNOOZE" -> {
                 Log.d("NotificationAction", "Snooze: $notificationId")
-                // Por ahora solo cerrar, luego implementar snooze real
-                notificationManager.cancel(notificationId.hashCode())
+                // Cerrar notificación actual
+                notificationManager.cancel(eventId.toInt())
 
-                // TODO: Reprogramar para 5 minutos después
+                // Por ahora solo cerrar la notificación
+                // TODO: Implementar snooze real reprogramando para 5 minutos después
                 CoroutineScope(Dispatchers.IO).launch {
-                    // Implementar snooze
+                    // En el futuro: reprogramar notificación
                 }
             }
 
             "DISMISS" -> {
                 Log.d("NotificationAction", "Dismiss: $notificationId")
-                notificationManager.cancel(notificationId.hashCode())
+                notificationManager.cancel(eventId.toInt())
             }
         }
     }

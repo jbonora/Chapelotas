@@ -3,15 +3,16 @@ package com.chapelotas.app.domain.usecases
 import android.content.Context
 import android.util.Log
 import com.chapelotas.app.domain.entities.*
+import com.chapelotas.app.domain.repositories.NotificationRepository
 import com.google.gson.Gson
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.*
 import java.io.File
 import java.time.LocalTime
+import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import javax.inject.Inject
 import javax.inject.Singleton
-import java.time.LocalDateTime
 
 /**
  * El Mono que checkea cada 5 minutos
@@ -21,7 +22,7 @@ import java.time.LocalDateTime
 class MonkeyCheckerService @Inject constructor(
     @ApplicationContext private val context: Context,
     private val masterPlanController: MasterPlanController,
-    private val notificationRepository: com.chapelotas.app.domain.repositories.NotificationRepository,
+    private val notificationRepository: NotificationRepository,
     private val gson: Gson
 ) {
     companion object {
@@ -34,7 +35,7 @@ class MonkeyCheckerService @Inject constructor(
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     /**
-     * Iniciar el mono
+     * Iniciar el mono con auto-recuperación
      */
     fun startMonkey() {
         Log.d(TAG, "🐵 Mono despertando...")
@@ -44,10 +45,12 @@ class MonkeyCheckerService @Inject constructor(
             while (isActive) {
                 try {
                     checkNotifications()
+                    delay(CHECK_INTERVAL_MS)
                 } catch (e: Exception) {
                     Log.e(TAG, "🐵 Error en el mono: ${e.message}")
+                    // Si hay error, esperar 30 segundos y continuar
+                    delay(30_000)
                 }
-                delay(CHECK_INTERVAL_MS)
             }
         }
     }
@@ -61,68 +64,102 @@ class MonkeyCheckerService @Inject constructor(
     }
 
     /**
-     * Checkeo principal cada 5 minutos
+     * Checkeo principal cada 5 minutos con manejo robusto de errores
      */
     private suspend fun checkNotifications() {
-        val now = LocalTime.now()
-        val nowStr = now.format(DateTimeFormatter.ofPattern("HH:mm"))
-        Log.d(TAG, "🐵 Mono checkeando: $nowStr")
+        try {
+            val now = LocalTime.now()
+            val nowStr = now.format(DateTimeFormatter.ofPattern("HH:mm"))
+            Log.d(TAG, "🐵 Mono checkeando: $nowStr")
 
-        // Cargar plan maestro
-        val plan = loadMasterPlan() ?: run {
-            Log.d(TAG, "🐵 No hay plan maestro")
-            return
-        }
+            // Cargar plan maestro
+            val plan = loadMasterPlan()
+            if (plan == null) {
+                Log.d(TAG, "🐵 No hay plan maestro, generando uno vacío...")
+                val emptyPlan = MasterPlan()
+                emptyPlan.proximoCheckeo = now.plusMinutes(5).format(DateTimeFormatter.ofPattern("HH:mm"))
+                saveMasterPlan(emptyPlan)
+                return
+            }
 
-        // Buscar notificaciones pendientes
-        val notificacionesPendientes = mutableListOf<EventoConNotificaciones>()
-        val eventosCriticosFuturos = mutableListOf<EventoConNotificaciones>()
+            // Buscar notificaciones pendientes
+            val notificacionesPendientes = mutableListOf<EventoConNotificaciones>()
+            val eventosCriticosFuturos = mutableListOf<EventoConNotificaciones>()
 
-        plan.eventosHoy.forEach { evento ->
-            // Checkear notificaciones programadas
-            evento.notificaciones.forEach { notif ->
-                if (!notif.ejecutada && notif.horaExacta <= nowStr) {
-                    notificacionesPendientes.add(evento)
-                    notif.ejecutada = true // Marcar como ejecutada
+            plan.eventosHoy.forEach { evento ->
+                try {
+                    // Checkear notificaciones programadas
+                    evento.notificaciones.forEach { notif ->
+                        if (!notif.ejecutada && notif.horaExacta <= nowStr) {
+                            notificacionesPendientes.add(evento)
+                            notif.ejecutada = true
+                        }
+                    }
+
+                    // Recolectar críticos futuros
+                    if (evento.esCritico && evento.horaInicio > nowStr) {
+                        eventosCriticosFuturos.add(evento)
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "🐵 Error procesando evento ${evento.id}: ${e.message}")
                 }
             }
 
-            // Recolectar críticos futuros
-            if (evento.esCritico && evento.horaInicio > nowStr) {
-                eventosCriticosFuturos.add(evento)
+            // Si hay algo que notificar
+            if (notificacionesPendientes.isNotEmpty() || eventosCriticosFuturos.isNotEmpty()) {
+                Log.d(TAG, "🐵 Hay ${notificacionesPendientes.size} notificaciones + ${eventosCriticosFuturos.size} críticos")
+
+                try {
+                    // Generar mensaje con IA
+                    val mensaje = masterPlanController.generarMensajeNotificacion(
+                        plan = plan,
+                        eventosANotificar = notificacionesPendientes,
+                        horaActual = nowStr
+                    )
+
+                    // Determinar tipo de notificación
+                    val esCritica = notificacionesPendientes.any { evento ->
+                        evento.notificaciones.any { it.tipo == "alerta_critica" && it.horaExacta <= nowStr }
+                    }
+
+                    // Mostrar notificación
+                    if (esCritica) {
+                        mostrarAlertaCritica(mensaje)
+                    } else {
+                        mostrarNotificacionNormal(mensaje)
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "🐵 Error generando notificación: ${e.message}")
+                    // Mostrar notificación básica como fallback
+                    val mensajeFallback = buildString {
+                        if (notificacionesPendientes.isNotEmpty()) {
+                            append("Próximos eventos:\n")
+                            notificacionesPendientes.forEach { evento ->
+                                append("• ${evento.horaInicio} ${evento.titulo}\n")
+                            }
+                        }
+                        if (eventosCriticosFuturos.isNotEmpty()) {
+                            append("\n⚠️ Eventos críticos pendientes: ${eventosCriticosFuturos.size}")
+                        }
+                    }
+                    mostrarNotificacionNormal(mensajeFallback.ifBlank { "Tenés eventos próximos. Revisá tu calendario." })
+                }
+
+                // Guardar plan actualizado
+                saveMasterPlan(plan)
             }
-        }
 
-        // Si hay algo que notificar O hay críticos pendientes
-        if (notificacionesPendientes.isNotEmpty() || eventosCriticosFuturos.isNotEmpty()) {
-            Log.d(TAG, "🐵 Hay ${notificacionesPendientes.size} notificaciones + ${eventosCriticosFuturos.size} críticos")
-
-            // Generar mensaje con IA
-            val mensaje = masterPlanController.generarMensajeNotificacion(
-                plan = plan,
-                eventosANotificar = notificacionesPendientes,
-                horaActual = nowStr
-            )
-
-            // Determinar tipo de notificación
-            val esCritica = notificacionesPendientes.any { evento ->
-                evento.notificaciones.any { it.tipo == "alerta_critica" && it.horaExacta <= nowStr }
-            }
-
-            // Mostrar notificación
-            if (esCritica) {
-                mostrarAlertaCritica(mensaje)
-            } else {
-                mostrarNotificacionNormal(mensaje)
-            }
-
-            // Guardar plan actualizado
+            // Actualizar próximo checkeo
+            plan.proximoCheckeo = now.plusMinutes(5).format(DateTimeFormatter.ofPattern("HH:mm"))
             saveMasterPlan(plan)
-        }
 
-        // Actualizar próximo checkeo
-        plan.proximoCheckeo = now.plusMinutes(5).format(DateTimeFormatter.ofPattern("HH:mm"))
-        saveMasterPlan(plan)
+            // Actualizar eventos críticos pendientes para la UI
+            plan.eventosCriticosPendientes.clear()
+            plan.eventosCriticosPendientes.addAll(eventosCriticosFuturos.map { it.titulo })
+
+        } catch (e: Exception) {
+            Log.e(TAG, "🐵 Error general en checkNotifications: ${e.message}")
+        }
     }
 
     /**
