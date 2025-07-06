@@ -30,7 +30,7 @@ import javax.inject.Singleton
 
 /**
  * Implementación del repositorio de notificaciones
- * Usa WorkManager para programar y Foreground Service para persistencia
+ * ACTUALIZADO para trabajar con Room y IDs consistentes
  */
 @Singleton
 class NotificationRepositoryImpl @Inject constructor(
@@ -53,9 +53,10 @@ class NotificationRepositoryImpl @Inject constructor(
         const val WORK_TAG_PREFIX = "chapelotas_notification_"
         const val NOTIFICATION_DATA_KEY = "notification_data"
 
-        // IDs
-        const val FOREGROUND_SERVICE_ID = 1337
-        private var notificationIdCounter = 2000
+        // Request codes for PendingIntents
+        private const val REQUEST_CODE_OPEN = 1000
+        private const val REQUEST_CODE_SNOOZE = 2000
+        private const val REQUEST_CODE_DISMISS = 3000
     }
 
     init {
@@ -63,41 +64,29 @@ class NotificationRepositoryImpl @Inject constructor(
     }
 
     override suspend fun scheduleNotification(notification: ChapelotasNotification) {
-        val delay = calculateDelay(notification.scheduledTime)
-
-        if (delay < 0) {
-            // Si ya pasó la hora, mostrar inmediatamente
-            showImmediateNotification(notification)
-            return
-        }
-
-        val workRequest = OneTimeWorkRequestBuilder<NotificationWorker>()
-            .setInitialDelay(delay, TimeUnit.MILLISECONDS)
-            .setInputData(
-                workDataOf(
-                    NOTIFICATION_DATA_KEY to gson.toJson(notification)
-                )
-            )
-            .addTag(WORK_TAG_PREFIX + notification.id)
-            .build()
-
-        workManager.enqueue(workRequest)
+        // Con Room, el UnifiedMonkeyService maneja la programación
+        // Este método queda por compatibilidad pero no se usa activamente
         updateNotificationsList(notification)
     }
 
     override suspend fun scheduleMultipleNotifications(notifications: List<ChapelotasNotification>) {
-        notifications.forEach { scheduleNotification(it) }
+        notifications.forEach { updateNotificationsList(it) }
     }
 
     override suspend fun cancelNotification(notificationId: String) {
-        workManager.cancelAllWorkByTag(WORK_TAG_PREFIX + notificationId)
-        removeFromNotificationsList(notificationId)
+        // Convertir a Int para Android NotificationManager
+        try {
+            val intId = notificationId.toIntOrNull() ?: notificationId.hashCode()
+            notificationManager.cancel(intId)
+            removeFromNotificationsList(notificationId)
+        } catch (e: Exception) {
+            // Log error
+        }
     }
 
     override suspend fun cancelNotificationsForEvent(eventId: Long) {
-        // Obtener todas las notificaciones del evento
-        val notifications = _notificationsFlow.value.filter { it.eventId == eventId }
-        notifications.forEach { cancelNotification(it.id) }
+        // Room maneja esto ahora
+        notificationManager.cancel(eventId.toInt())
     }
 
     override suspend fun getPendingNotifications(): List<ChapelotasNotification> {
@@ -134,14 +123,13 @@ class NotificationRepositoryImpl @Inject constructor(
     override suspend fun showImmediateNotification(notification: ChapelotasNotification) {
         when (notification.type) {
             NotificationType.CRITICAL_ALERT -> {
-                // Las críticas siguen usando la pantalla completa
                 showCriticalAlert(notification)
             }
             else -> {
-                // Todas las demás usan estilo Calendar
                 showCalendarStyleNotification(notification)
             }
         }
+        markAsShown(notification.id)
     }
 
     override suspend fun isNotificationServiceRunning(): Boolean {
@@ -164,7 +152,7 @@ class NotificationRepositoryImpl @Inject constructor(
     }
 
     /**
-     * Notificación estilo Google Calendar
+     * Notificación estilo Google Calendar MEJORADA
      */
     private fun showCalendarStyleNotification(notification: ChapelotasNotification) {
         val channelId = when (notification.priority) {
@@ -186,36 +174,43 @@ class NotificationRepositoryImpl @Inject constructor(
             else -> "en ${minutesUntil / 60}h ${minutesUntil % 60}min"
         }
 
+        // Obtener IDs numéricos consistentes
+        val notificationIdLong = notification.id.toLongOrNull() ?: notification.id.hashCode().toLong()
+        val androidNotifId = (notificationIdLong and Int.MAX_VALUE.toLong()).toInt()
+
         // Intent para abrir la app
         val openAppIntent = PendingIntent.getActivity(
             context,
-            notification.id.hashCode(),
+            REQUEST_CODE_OPEN + androidNotifId,
             Intent(context, MainActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                putExtra(NotificationActionReceiver.EXTRA_NOTIFICATION_ID, notificationIdLong)
+                putExtra(NotificationActionReceiver.EXTRA_EVENT_ID, notification.eventId.toString())
             },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        // Intent para posponer
+        // Intent para posponer - CORREGIDO
         val snoozeIntent = PendingIntent.getBroadcast(
             context,
-            notification.id.hashCode() + 1,
+            REQUEST_CODE_SNOOZE + androidNotifId,
             Intent(context, NotificationActionReceiver::class.java).apply {
-                action = "SNOOZE"
-                putExtra("notification_id", notification.id)
-                putExtra("event_id", notification.eventId)
+                action = NotificationActionReceiver.ACTION_SNOOZE
+                putExtra(NotificationActionReceiver.EXTRA_NOTIFICATION_ID, notificationIdLong)
+                putExtra(NotificationActionReceiver.EXTRA_EVENT_ID, notification.eventId.toString())
+                putExtra(NotificationActionReceiver.EXTRA_SNOOZE_MINUTES, 5)
             },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        // Intent para descartar
+        // Intent para descartar - CORREGIDO
         val dismissIntent = PendingIntent.getBroadcast(
             context,
-            notification.id.hashCode() + 2,
+            REQUEST_CODE_DISMISS + androidNotifId,
             Intent(context, NotificationActionReceiver::class.java).apply {
-                action = "DISMISS"
-                putExtra("notification_id", notification.id)
-                putExtra("event_id", notification.eventId)
+                action = NotificationActionReceiver.ACTION_DISMISS
+                putExtra(NotificationActionReceiver.EXTRA_NOTIFICATION_ID, notificationIdLong)
+                putExtra(NotificationActionReceiver.EXTRA_EVENT_ID, notification.eventId.toString())
             },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
@@ -225,7 +220,7 @@ class NotificationRepositoryImpl @Inject constructor(
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(titulo)
             .setContentText(timeText)
-            .setSubText("Calendario")
+            .setSubText("Chapelotas")
             .setStyle(
                 NotificationCompat.BigTextStyle()
                     .bigText(notification.message)
@@ -243,23 +238,36 @@ class NotificationRepositoryImpl @Inject constructor(
             )
             .setCategory(NotificationCompat.CATEGORY_EVENT)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .setAutoCancel(false)
-            .setOnlyAlertOnce(true)
+            .setAutoCancel(false) // No auto-cancelar para poder hacer snooze
+            .setOnlyAlertOnce(false) // Alertar cada vez
             .setShowWhen(true)
             .setWhen(System.currentTimeMillis())
             .setContentIntent(openAppIntent)
             .addAction(
-                android.R.drawable.ic_menu_recent_history,
-                "Posponer",
+                R.drawable.ic_snooze,
+                "Posponer 5min",
                 snoozeIntent
             )
             .addAction(
-                android.R.drawable.checkbox_on_background,
+                R.drawable.ic_check,
                 "Listo",
                 dismissIntent
             )
-            .setVibrate(longArrayOf(0, 200, 100, 200))
-            .setLights(android.graphics.Color.BLUE, 1000, 1000)
+
+        // Sonido y vibración según prioridad
+        when (notification.priority) {
+            NotificationPriority.CRITICAL, NotificationPriority.HIGH -> {
+                builder.setVibrate(longArrayOf(0, 300, 200, 300))
+                builder.setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM))
+            }
+            NotificationPriority.NORMAL -> {
+                builder.setVibrate(longArrayOf(0, 200, 100, 200))
+                builder.setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION))
+            }
+            NotificationPriority.LOW -> {
+                // Sin vibración ni sonido
+            }
+        }
 
         // Para Android 8+ agregar badge
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -268,7 +276,7 @@ class NotificationRepositoryImpl @Inject constructor(
 
         if (notificationManager.areNotificationsEnabled()) {
             notificationManager.notify(
-                notification.eventId.toInt(),
+                androidNotifId,
                 builder.build()
             )
         }
@@ -282,11 +290,12 @@ class NotificationRepositoryImpl @Inject constructor(
             val channels = listOf(
                 NotificationChannel(
                     CHANNEL_GENERAL,
-                    "Notificaciones Generales",
+                    "Recordatorios",
                     NotificationManager.IMPORTANCE_DEFAULT
                 ).apply {
-                    description = "Recordatorios y resúmenes de Chapelotas"
+                    description = "Recordatorios de eventos"
                     enableVibration(true)
+                    setShowBadge(true)
                 },
 
                 NotificationChannel(
@@ -294,14 +303,16 @@ class NotificationRepositoryImpl @Inject constructor(
                     "Alertas Críticas",
                     NotificationManager.IMPORTANCE_HIGH
                 ).apply {
-                    description = "Eventos que no podés perderte"
+                    description = "Eventos críticos que no podés perderte"
                     enableVibration(true)
                     setBypassDnd(true)
+                    setShowBadge(true)
+                    vibrationPattern = longArrayOf(0, 300, 200, 300)
                 },
 
                 NotificationChannel(
                     CHANNEL_SERVICE,
-                    "Servicio de Notificaciones",
+                    "Servicio",
                     NotificationManager.IMPORTANCE_LOW
                 ).apply {
                     description = "Mantiene Chapelotas activo"
@@ -318,21 +329,19 @@ class NotificationRepositoryImpl @Inject constructor(
      * Muestra una alerta crítica (pantalla completa)
      */
     private fun showCriticalAlert(notification: ChapelotasNotification) {
+        // Primero mostrar notificación normal también
+        showCalendarStyleNotification(notification)
+
+        // Luego la pantalla completa
         val intent = Intent(context, CriticalAlertActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or
                     Intent.FLAG_ACTIVITY_CLEAR_TOP or
                     Intent.FLAG_ACTIVITY_SINGLE_TOP
             putExtra("message", notification.message)
             putExtra("event_id", notification.eventId)
+            putExtra("notification_id", notification.id.toLongOrNull() ?: 0L)
         }
         context.startActivity(intent)
-    }
-
-    /**
-     * Calcula el delay para programar la notificación
-     */
-    private fun calculateDelay(scheduledTime: LocalDateTime): Long {
-        return Duration.between(LocalDateTime.now(), scheduledTime).toMillis()
     }
 
     /**

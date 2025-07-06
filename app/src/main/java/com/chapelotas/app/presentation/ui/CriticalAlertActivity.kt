@@ -1,5 +1,6 @@
 package com.chapelotas.app.presentation.ui
 
+import android.content.Intent
 import android.media.Ringtone
 import android.media.RingtoneManager
 import android.os.Bundle
@@ -21,28 +22,29 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.chapelotas.app.data.notifications.NotificationActionReceiver
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.delay
 
 /**
- * Actividad de alerta crítica que simula una llamada entrante
- * No se puede ignorar fácilmente
+ * Actividad de alerta crítica - SIN INYECCIÓN para evitar conflictos
  */
 @AndroidEntryPoint
 class CriticalAlertActivity : ComponentActivity() {
 
     private var ringtone: Ringtone? = null
     private var vibrator: Vibrator? = null
+    private var notificationId: Long = 0
+    private var eventId: String = ""
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Configurar la pantalla para que se muestre incluso con el teléfono bloqueado
+        // Configurar pantalla
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O_MR1) {
             setShowWhenLocked(true)
             setTurnScreenOn(true)
         } else {
-            // Para APIs antiguas, usar los flags deprecados
             @Suppress("DEPRECATION")
             window.addFlags(
                 WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
@@ -50,16 +52,16 @@ class CriticalAlertActivity : ComponentActivity() {
             )
         }
 
-        // Estos flags funcionan en todas las versiones
         window.addFlags(
             WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
                     WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD
         )
 
-        // Obtener el mensaje de la notificación
+        // Obtener datos
         val message = intent.getStringExtra("message") ?: "¡EVENTO CRÍTICO!"
+        eventId = intent.getLongExtra("event_id", 0).toString()
+        notificationId = intent.getLongExtra("notification_id", 0)
 
-        // Iniciar sonido y vibración
         startAlarm()
 
         setContent {
@@ -67,12 +69,11 @@ class CriticalAlertActivity : ComponentActivity() {
                 message = message,
                 onDismiss = {
                     stopAlarm()
-                    finishAndRemoveTask() // ← CAMBIO: usar finishAndRemoveTask()
+                    handleDismiss()
                 },
                 onSnooze = {
                     stopAlarm()
-                    // TODO: Implementar snooze
-                    finishAndRemoveTask() // ← CAMBIO: usar finishAndRemoveTask()
+                    handleSnooze()
                 }
             )
         }
@@ -83,27 +84,49 @@ class CriticalAlertActivity : ComponentActivity() {
         stopAlarm()
     }
 
+    private fun handleSnooze() {
+        // Enviar broadcast al receiver
+        val intent = Intent(this, NotificationActionReceiver::class.java).apply {
+            action = NotificationActionReceiver.ACTION_SNOOZE
+            putExtra(NotificationActionReceiver.EXTRA_NOTIFICATION_ID, notificationId)
+            putExtra(NotificationActionReceiver.EXTRA_EVENT_ID, eventId)
+            putExtra(NotificationActionReceiver.EXTRA_SNOOZE_MINUTES, 5)
+        }
+        sendBroadcast(intent)
+        finishAndRemoveTask()
+    }
+
+    private fun handleDismiss() {
+        // Enviar broadcast al receiver
+        val intent = Intent(this, NotificationActionReceiver::class.java).apply {
+            action = NotificationActionReceiver.ACTION_DISMISS
+            putExtra(NotificationActionReceiver.EXTRA_NOTIFICATION_ID, notificationId)
+            putExtra(NotificationActionReceiver.EXTRA_EVENT_ID, eventId)
+        }
+        sendBroadcast(intent)
+        finishAndRemoveTask()
+    }
+
     private fun startAlarm() {
-        // Sonido
         try {
             val alarmUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+                ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
+
             ringtone = RingtoneManager.getRingtone(applicationContext, alarmUri)
             ringtone?.play()
         } catch (e: Exception) {
             e.printStackTrace()
         }
 
-        // Vibración
         vibrator = getSystemService(VIBRATOR_SERVICE) as Vibrator
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
             vibrator?.vibrate(
                 VibrationEffect.createWaveform(
                     longArrayOf(0, 1000, 500, 1000, 500, 1000),
-                    0 // Repetir desde el índice 0
+                    0
                 )
             )
         } else {
-            // Para APIs antiguas
             @Suppress("DEPRECATION")
             vibrator?.vibrate(longArrayOf(0, 1000, 500, 1000, 500, 1000), 0)
         }
@@ -122,13 +145,21 @@ fun CriticalAlertScreen(
     onSnooze: () -> Unit
 ) {
     var isBlinking by remember { mutableStateOf(true) }
+    var secondsRemaining by remember { mutableStateOf(60) }
 
-    // Efecto de parpadeo
     LaunchedEffect(Unit) {
         while (true) {
             delay(500)
             isBlinking = !isBlinking
         }
+    }
+
+    LaunchedEffect(Unit) {
+        while (secondsRemaining > 0) {
+            delay(1000)
+            secondsRemaining--
+        }
+        onDismiss()
     }
 
     Box(
@@ -143,38 +174,48 @@ fun CriticalAlertScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.SpaceEvenly
         ) {
-            // Título
             Text(
-                text = "🚨 ALERTA CRÍTICA 🚨",
+                text = if (isBlinking) "🚨 ALERTA CRÍTICA 🚨" else "⚠️ ALERTA CRÍTICA ⚠️",
                 fontSize = 32.sp,
                 fontWeight = FontWeight.Bold,
                 color = Color.White,
                 textAlign = TextAlign.Center
             )
 
-            // Mensaje
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(16.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White)
+                colors = CardDefaults.cardColors(containerColor = Color.White),
+                elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
             ) {
-                Text(
-                    text = message,
+                Column(
                     modifier = Modifier.padding(24.dp),
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = Color.Black,
-                    textAlign = TextAlign.Center
-                )
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = message,
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = Color.Black,
+                        textAlign = TextAlign.Center
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Text(
+                        text = "Auto-dismiss en $secondsRemaining segundos",
+                        fontSize = 12.sp,
+                        color = Color.Gray,
+                        textAlign = TextAlign.Center
+                    )
+                }
             }
 
-            // Botones
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceEvenly
             ) {
-                // Botón Snooze
                 Button(
                     onClick = onSnooze,
                     modifier = Modifier
@@ -185,14 +226,15 @@ fun CriticalAlertScreen(
                         contentColor = Color.Black
                     )
                 ) {
-                    Text(
-                        text = "POSPONER\n5 MIN",
-                        fontWeight = FontWeight.Bold,
-                        textAlign = TextAlign.Center
-                    )
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text("😴", fontSize = 24.sp)
+                        Text("POSPONER", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Text("5 MIN", fontSize = 12.sp)
+                    }
                 }
 
-                // Botón Dismiss
                 Button(
                     onClick = onDismiss,
                     modifier = Modifier
@@ -203,21 +245,29 @@ fun CriticalAlertScreen(
                         contentColor = Color.White
                     )
                 ) {
-                    Text(
-                        text = "ENTENDIDO",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 16.sp
-                    )
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text("✅", fontSize = 24.sp)
+                        Text("ENTENDIDO", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    }
                 }
             }
 
-            // Texto de advertencia
-            Text(
-                text = "⚠️ ESTE EVENTO FUE MARCADO COMO CRÍTICO ⚠️",
-                fontSize = 14.sp,
-                color = Color.White,
-                textAlign = TextAlign.Center
-            )
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = Color.Black.copy(alpha = 0.3f)
+                )
+            ) {
+                Text(
+                    text = "⚠️ ESTE EVENTO FUE MARCADO COMO CRÍTICO ⚠️\nNo te lo podés perder",
+                    fontSize = 14.sp,
+                    color = Color.White,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(12.dp)
+                )
+            }
         }
     }
 }

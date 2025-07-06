@@ -3,50 +3,90 @@ package com.chapelotas.app.presentation.viewmodels
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.chapelotas.app.data.database.ChapelotasDatabase
+import com.chapelotas.app.data.database.entities.*
 import com.chapelotas.app.domain.entities.CalendarEvent
-import com.chapelotas.app.domain.entities.MasterPlan
+import com.chapelotas.app.domain.events.ChapelotasEvent
+import com.chapelotas.app.domain.events.ChapelotasEventBus
+import com.chapelotas.app.domain.events.filterEvent
 import com.chapelotas.app.domain.repositories.CalendarRepository
 import com.chapelotas.app.domain.usecases.MasterPlanController
-import com.chapelotas.app.domain.usecases.MonkeyCheckerService
+import com.chapelotas.app.domain.usecases.UnifiedMonkeyService
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 import javax.inject.Inject
 
+/**
+ * ViewModel para monitorear el calendario
+ * ACTUALIZADO para usar Room en lugar de JSON
+ */
 @HiltViewModel
 class CalendarMonitorViewModel @Inject constructor(
+    private val database: ChapelotasDatabase,
     private val calendarRepository: CalendarRepository,
     private val masterPlanController: MasterPlanController,
-    private val monkeyChecker: MonkeyCheckerService
+    private val unifiedMonkey: UnifiedMonkeyService,
+    private val eventBus: ChapelotasEventBus
 ) : ViewModel() {
 
-    private val _currentPlan = MutableStateFlow<MasterPlan?>(null)
-    val currentPlan: StateFlow<MasterPlan?> = _currentPlan
+    // Estado del plan del día (desde Room)
+    val currentDayPlan: StateFlow<DayPlan?> = database.dayPlanDao()
+        .observeTodayPlan()
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = null
+        )
 
+    // Eventos de hoy (desde Room)
+    val todayEvents: StateFlow<List<EventPlan>> = database.eventPlanDao()
+        .observeTodayEvents()
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
+
+    // Conflictos activos
+    val activeConflicts: StateFlow<List<EventConflict>> = database.conflictDao()
+        .observeActiveConflicts()
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
+
+    // Estado del mono
     private val _isMonitoring = MutableStateFlow(false)
-    val isMonitoring: StateFlow<Boolean> = _isMonitoring
+    val isMonitoring: StateFlow<Boolean> = _isMonitoring.asStateFlow()
+
+    // Próximo check time
+    private val _nextCheckTime = MutableStateFlow<LocalDateTime?>(null)
+    val nextCheckTime: StateFlow<LocalDateTime?> = _nextCheckTime.asStateFlow()
 
     init {
-        // Intentar cargar plan existente al iniciar
-        viewModelScope.launch {
-            val planExistente = monkeyChecker.loadMasterPlan()
-            if (planExistente != null) {
-                _currentPlan.value = planExistente
-                Log.d("CalendarMonitor", "Plan existente cargado")
-            }
+        // Observar eventos del sistema
+        observeSystemEvents()
 
-            // Iniciar monitoreo automáticamente
+        // Iniciar el día automáticamente después de un delay
+        viewModelScope.launch {
             delay(2000) // Dar tiempo a que todo se inicialice
             if (!_isMonitoring.value) {
                 iniciarDia()
             }
         }
+
+        // Observar cambios en el calendario
+        observarCalendario()
     }
 
     /**
-     * Iniciar el día (se llama automáticamente)
+     * Iniciar el día - Sincronizar calendario con Room y activar el mono
      */
     fun iniciarDia() {
         if (_isMonitoring.value) {
@@ -56,38 +96,31 @@ class CalendarMonitorViewModel @Inject constructor(
 
         viewModelScope.launch {
             try {
-                Log.d("CalendarMonitor", "🐵 Despertando al mono...")
+                Log.d("CalendarMonitor", "🌅 Iniciando el día...")
 
-                // 1. Obtener eventos del día
-                val todayEvents = calendarRepository.getTodayEvents()
-                Log.d("CalendarMonitor", "Eventos encontrados: ${todayEvents.size}")
+                // 1. Asegurar que existe el plan del día
+                val dayPlan = database.dayPlanDao().getOrCreateTodayPlan(
+                    userId = "user123", // TODO: Obtener de preferencias
+                    userName = "Usuario" // TODO: Obtener de preferencias
+                )
 
-                // 2. Cargar plan existente o generar uno nuevo
-                var planInicial = monkeyChecker.loadMasterPlan()
+                // 2. Obtener eventos del calendario
+                val calendarEvents = calendarRepository.getTodayEvents()
+                Log.d("CalendarMonitor", "📅 Eventos del calendario: ${calendarEvents.size}")
 
-                if (planInicial == null || planInicial.eventosHoy.isEmpty()) {
-                    // Generar plan inicial con IA
-                    Log.d("CalendarMonitor", "Generando plan inicial con IA...")
-                    planInicial = masterPlanController.analizarDiaInicial(todayEvents)
-                } else {
-                    // Actualizar eventos si hay cambios
-                    Log.d("CalendarMonitor", "Actualizando plan existente...")
-                    // TODO: Sincronizar eventos nuevos/eliminados
+                // 3. Sincronizar con Room
+                syncCalendarWithRoom(calendarEvents, dayPlan)
+
+                // 4. Análisis inicial con IA
+                if (calendarEvents.isNotEmpty()) {
+                    performInitialAIAnalysis(dayPlan)
                 }
 
-                // 3. Guardar plan
-                monkeyChecker.saveMasterPlan(planInicial)
-                _currentPlan.value = planInicial
-
-                // 4. Iniciar el mono
-                monkeyChecker.startMonkey()
+                // 5. Iniciar el mono
+                unifiedMonkey.startMonkey()
                 _isMonitoring.value = true
 
-                // 5. Observar cambios en calendario
-                observarCalendario()
-
-                // 6. Auto-recuperación: Si el mono muere, revivirlo
-                monitorearEstadoMono()
+                Log.d("CalendarMonitor", "✅ Día iniciado exitosamente")
 
             } catch (e: Exception) {
                 Log.e("CalendarMonitor", "Error iniciando el día", e)
@@ -99,81 +132,172 @@ class CalendarMonitorViewModel @Inject constructor(
     }
 
     /**
-     * El mono nunca debería detenerse, pero por si acaso...
+     * Sincronizar eventos del calendario con Room
      */
-    fun detenerMonitoreo() {
-        // NO hacer nada - el mono es inmortal
-        Log.w("CalendarMonitor", "Intento de detener el mono ignorado - El mono es eterno 🐵")
-    }
+    private suspend fun syncCalendarWithRoom(
+        calendarEvents: List<CalendarEvent>,
+        dayPlan: DayPlan
+    ) {
+        database.withTransaction {
+            // Obtener eventos existentes
+            val existingEvents = database.eventPlanDao().getEventsByDate(dayPlan.date)
+            val existingIds = existingEvents.map { it.calendarEventId }.toSet()
 
-    /**
-     * Monitorear que el mono siga vivo
-     */
-    private fun monitorearEstadoMono() {
-        viewModelScope.launch {
-            while (true) {
-                delay(60_000) // Cada minuto
+            // Agregar eventos nuevos
+            val newEvents = calendarEvents.filter { it.id !in existingIds }
 
-                if (!_isMonitoring.value) {
-                    Log.w("CalendarMonitor", "¡El mono murió! Reviviéndolo...")
-                    iniciarDia()
-                }
+            for (event in newEvents) {
+                val eventPlan = EventPlan(
+                    eventId = "${event.id}_${dayPlan.date}",
+                    dayDate = dayPlan.date,
+                    calendarId = event.calendarId,
+                    calendarEventId = event.id,
+                    title = event.title,
+                    description = event.description,
+                    startTime = event.startTime,
+                    endTime = event.endTime,
+                    location = event.location,
+                    isAllDay = event.isAllDay,
+                    isCritical = event.isCritical,
+                    distance = EventDistance.CERCA // Default
+                )
 
-                // Actualizar el plan visible
-                val planActual = monkeyChecker.loadMasterPlan()
-                if (planActual != null) {
-                    _currentPlan.value = planActual
-                }
+                database.eventPlanDao().insert(eventPlan)
+
+                // Crear notificaciones default
+                createDefaultNotifications(eventPlan)
+
+                // Emitir evento
+                eventBus.emit(ChapelotasEvent.NewEventDetected(
+                    eventId = eventPlan.eventId,
+                    title = eventPlan.title,
+                    startTime = eventPlan.startTime
+                ))
+            }
+
+            // Marcar eventos eliminados
+            val currentIds = calendarEvents.map { it.id }.toSet()
+            val deletedEvents = existingEvents.filter { it.calendarEventId !in currentIds }
+
+            for (event in deletedEvents) {
+                database.eventPlanDao().deleteById(event.eventId)
+                database.notificationDao().deleteByEventId(event.eventId)
+
+                eventBus.emit(ChapelotasEvent.EventDeleted(
+                    eventId = event.eventId,
+                    title = event.title
+                ))
             }
         }
     }
 
     /**
-     * Usuario actualiza criticidad/distancia
+     * Crear notificaciones default para un evento
+     */
+    private suspend fun createDefaultNotifications(event: EventPlan) {
+        val notificationMinutes = event.getNotificationMinutesList()
+
+        val notifications = notificationMinutes.mapIndexed { index, minutes ->
+            ScheduledNotification(
+                eventId = event.eventId,
+                scheduledTime = event.startTime.minusMinutes(minutes.toLong()),
+                minutesBefore = minutes,
+                type = if (event.isCritical && minutes <= 15)
+                    NotificationType.CRITICAL_ALERT
+                else
+                    NotificationType.REMINDER,
+                priority = when {
+                    event.isCritical -> NotificationPriority.HIGH
+                    index == 0 -> NotificationPriority.NORMAL // Primera notificación
+                    else -> NotificationPriority.LOW
+                }
+            )
+        }.filter {
+            // Solo crear notificaciones futuras
+            it.scheduledTime.isAfter(LocalDateTime.now())
+        }
+
+        database.notificationDao().insertAll(notifications)
+    }
+
+    /**
+     * Análisis inicial con IA
+     */
+    private suspend fun performInitialAIAnalysis(dayPlan: DayPlan) {
+        try {
+            eventBus.emit(ChapelotasEvent.AIAnalysisStarted("daily"))
+
+            // Aquí podríamos usar la IA para:
+            // 1. Sugerir eventos críticos
+            // 2. Detectar conflictos
+            // 3. Optimizar tiempos de notificación
+
+            // Por ahora solo actualizamos el timestamp
+            database.dayPlanDao().updateLastAiAnalysis(dayPlan.date)
+
+            eventBus.emit(ChapelotasEvent.AIAnalysisCompleted(
+                type = "daily",
+                success = true,
+                itemsProcessed = todayEvents.value.size
+            ))
+
+        } catch (e: Exception) {
+            Log.e("CalendarMonitor", "Error en análisis IA", e)
+            eventBus.emit(ChapelotasEvent.AIAnalysisCompleted(
+                type = "daily",
+                success = false,
+                itemsProcessed = 0
+            ))
+        }
+    }
+
+    /**
+     * Usuario actualiza criticidad/distancia de un evento
      */
     fun actualizarEvento(eventoId: String, esCritico: Boolean, distancia: String) {
         viewModelScope.launch {
-            val plan = monkeyChecker.loadMasterPlan() ?: return@launch
+            try {
+                val eventDistance = EventDistance.fromString(distancia)
 
-            plan.eventosHoy.find { it.id == eventoId }?.let { evento ->
-                evento.esCritico = esCritico
-                evento.distancia = distancia
+                // Actualizar en Room
+                database.eventPlanDao().updateCritical(eventoId, esCritico)
+                database.eventPlanDao().updateDistance(eventoId, eventDistance)
 
-                // Recalcular tiempos de aviso según distancia
-                evento.avisosSugeridos = when(distancia) {
-                    "lejos" -> listOf(60, 30, 10)
-                    "cerca" -> listOf(20, 10)
-                    else -> listOf(15, 5)
-                }
+                // Actualizar notificaciones basadas en la nueva distancia
+                database.withTransaction {
+                    // Eliminar notificaciones existentes no ejecutadas
+                    val existingNotifications = database.notificationDao()
+                        .getActiveNotificationsByEvent(eventoId)
 
-                // Reprogramar notificaciones para este evento
-                val ahora = java.time.LocalTime.now()
-                val horaEvento = java.time.LocalTime.parse(evento.horaInicio,
-                    java.time.format.DateTimeFormatter.ofPattern("HH:mm"))
-
-                evento.notificaciones.clear()
-                evento.avisosSugeridos.forEach { minutosAntes ->
-                    val horaNotif = horaEvento.minusMinutes(minutosAntes.toLong())
-                    if (horaNotif.isAfter(ahora)) {
-                        evento.notificaciones.add(
-                            com.chapelotas.app.domain.entities.NotificacionProgramada(
-                                horaExacta = horaNotif.format(
-                                    java.time.format.DateTimeFormatter.ofPattern("HH:mm")
-                                ),
-                                minutosAntes = minutosAntes,
-                                ejecutada = false,
-                                tipo = if (esCritico && minutosAntes <= 15) "alerta_critica" else "recordatorio",
-                                razonIa = "Actualizado por usuario - distancia: $distancia"
-                            )
-                        )
+                    existingNotifications.forEach {
+                        database.notificationDao().delete(it)
                     }
+
+                    // Crear nuevas notificaciones con los tiempos actualizados
+                    val event = database.eventPlanDao().getEvent(eventoId) ?: return@withTransaction
+                    createDefaultNotifications(event.copy(
+                        isCritical = esCritico,
+                        distance = eventDistance
+                    ))
                 }
+
+                // Emitir eventos
+                eventBus.emit(ChapelotasEvent.EventMarkedCritical(
+                    eventId = eventoId,
+                    isCritical = esCritico
+                ))
+
+                eventBus.emit(ChapelotasEvent.DistanceUpdated(
+                    eventId = eventoId,
+                    distance = eventDistance,
+                    previousDistance = EventDistance.CERCA
+                ))
+
+                Log.d("CalendarMonitor", "✅ Evento actualizado: $eventoId")
+
+            } catch (e: Exception) {
+                Log.e("CalendarMonitor", "Error actualizando evento", e)
             }
-
-            monkeyChecker.saveMasterPlan(plan)
-            _currentPlan.value = plan
-
-            Log.d("CalendarMonitor", "Evento $eventoId actualizado: crítico=$esCritico, distancia=$distancia")
         }
     }
 
@@ -183,39 +307,42 @@ class CalendarMonitorViewModel @Inject constructor(
     private fun observarCalendario() {
         viewModelScope.launch {
             calendarRepository.observeCalendarChanges().collect {
-                Log.d("CalendarMonitor", "Cambio detectado en calendario")
+                Log.d("CalendarMonitor", "📅 Cambio detectado en calendario")
 
-                try {
-                    // Detectar eventos nuevos
-                    val eventosActuales = calendarRepository.getTodayEvents()
-                    val plan = monkeyChecker.loadMasterPlan() ?: return@collect
+                // Re-sincronizar si estamos monitoreando
+                if (_isMonitoring.value) {
+                    currentDayPlan.value?.let { plan ->
+                        val events = calendarRepository.getTodayEvents()
+                        syncCalendarWithRoom(events, plan)
+                    }
+                }
+            }
+        }
+    }
 
-                    val idsExistentes = plan.eventosHoy.map { it.id }.toSet()
-                    val eventosNuevos = eventosActuales.filter {
-                        it.id.toString() !in idsExistentes
+    /**
+     * Observar eventos del sistema
+     */
+    private fun observeSystemEvents() {
+        viewModelScope.launch {
+            eventBus.events.collect { event ->
+                when (event) {
+                    is ChapelotasEvent.MonkeyCheckCompleted -> {
+                        _nextCheckTime.value = event.nextCheckTime
                     }
 
-                    // Procesar cada evento nuevo
-                    eventosNuevos.forEach { eventoNuevo ->
-                        Log.d("CalendarMonitor", "Evento nuevo detectado: ${eventoNuevo.title}")
-                        monkeyChecker.procesarEventoNuevo(eventoNuevo)
+                    is ChapelotasEvent.ConflictDetected -> {
+                        // Los conflictos ya se muestran via Flow de Room
+                        Log.d("CalendarMonitor", "⚠️ Conflicto detectado: ${event.conflictId}")
                     }
 
-                    // Detectar eventos eliminados
-                    val idsActuales = eventosActuales.map { it.id.toString() }.toSet()
-                    val eventosEliminados = plan.eventosHoy.filter { it.id !in idsActuales }
-
-                    if (eventosEliminados.isNotEmpty()) {
-                        Log.d("CalendarMonitor", "Eventos eliminados: ${eventosEliminados.size}")
-                        plan.eventosHoy.removeAll(eventosEliminados)
-                        monkeyChecker.saveMasterPlan(plan)
+                    is ChapelotasEvent.NotificationShown -> {
+                        Log.d("CalendarMonitor", "🔔 Notificación mostrada: ${event.eventId}")
                     }
 
-                    // Actualizar vista
-                    _currentPlan.value = monkeyChecker.loadMasterPlan()
-
-                } catch (e: Exception) {
-                    Log.e("CalendarMonitor", "Error procesando cambios del calendario", e)
+                    else -> {
+                        // Otros eventos
+                    }
                 }
             }
         }
@@ -223,7 +350,7 @@ class CalendarMonitorViewModel @Inject constructor(
 
     override fun onCleared() {
         super.onCleared()
-        // NO detener el mono - debe seguir corriendo
+        // NO detener el mono - debe seguir corriendo en el servicio
         Log.d("CalendarMonitor", "ViewModel limpiado pero el mono sigue activo")
     }
 }

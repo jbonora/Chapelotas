@@ -11,6 +11,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
+import androidx.annotation.RequiresApi
 import android.util.Log
 
 // Imports de AndroidX
@@ -19,8 +20,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
-import androidx.annotation.RequiresApi
-import androidx.lifecycle.lifecycleScope  // ← ESTE ES EL QUE FALTABA
+import androidx.lifecycle.lifecycleScope
 
 // Imports de Compose
 import androidx.compose.animation.AnimatedVisibility
@@ -41,14 +41,19 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
-// Imports de tu app
-import com.chapelotas.app.data.notifications.ChapelotasNotificationService
+// Imports de tu app - Entidades
 import com.chapelotas.app.domain.entities.CalendarEvent
-import com.chapelotas.app.domain.entities.EventoConNotificaciones
-import com.chapelotas.app.domain.entities.MasterPlan
+import com.chapelotas.app.data.database.entities.DayPlan
+import com.chapelotas.app.data.database.entities.EventPlan
+import com.chapelotas.app.data.database.entities.EventDistance
+import com.chapelotas.app.data.database.entities.EventConflict
+
+// Imports de tu app - ViewModels
 import com.chapelotas.app.presentation.viewmodels.MainViewModel
 import com.chapelotas.app.presentation.viewmodels.MainUiState
 import com.chapelotas.app.presentation.viewmodels.CalendarMonitorViewModel
+
+// Imports de tu app - UI
 import com.chapelotas.app.ui.theme.ChapelotasTheme
 
 // Imports de Dagger/Hilt
@@ -92,9 +97,11 @@ class MainActivity : ComponentActivity() {
                 val dailySummary by viewModel.dailySummary.collectAsStateWithLifecycle()
                 val tomorrowSummary by viewModel.tomorrowSummary.collectAsStateWithLifecycle()
 
-                // Estados del monitor
+                // Estados del monitor con Room
                 val isMonitoring by calendarMonitorViewModel.isMonitoring.collectAsStateWithLifecycle()
-                val currentPlan by calendarMonitorViewModel.currentPlan.collectAsStateWithLifecycle()
+                val dayPlan by calendarMonitorViewModel.currentDayPlan.collectAsStateWithLifecycle()
+                val todayEventPlans by calendarMonitorViewModel.todayEvents.collectAsStateWithLifecycle()
+                val activeConflicts by calendarMonitorViewModel.activeConflicts.collectAsStateWithLifecycle()
 
                 // Iniciar el mono automáticamente si tenemos permisos
                 LaunchedEffect(uiState.requiresPermissions) {
@@ -118,13 +125,14 @@ class MainActivity : ComponentActivity() {
                     dailySummary = dailySummary,
                     tomorrowSummary = tomorrowSummary,
                     isMonitoring = isMonitoring,
-                    currentPlan = currentPlan,
+                    dayPlan = dayPlan,
+                    eventPlans = todayEventPlans,
+                    conflicts = activeConflicts,
                     onRequestPermissions = {
                         calendarPermissionLauncher.launch(Manifest.permission.READ_CALENDAR)
                     },
                     onLoadDailySummary = viewModel::loadDailySummary,
                     onLoadTomorrowSummary = viewModel::loadTomorrowSummary,
-                    onScheduleNotifications = viewModel::scheduleNotifications,
                     onToggleEventCritical = viewModel::toggleEventCritical,
                     onDismissError = viewModel::clearError,
                     onUpdateEventDistance = calendarMonitorViewModel::actualizarEvento
@@ -302,17 +310,17 @@ fun MainScreen(
     dailySummary: String,
     tomorrowSummary: String,
     isMonitoring: Boolean,
-    currentPlan: MasterPlan?,
+    dayPlan: DayPlan?,
+    eventPlans: List<EventPlan>,
+    conflicts: List<EventConflict>,
     onRequestPermissions: () -> Unit,
     onLoadDailySummary: () -> Unit,
     onLoadTomorrowSummary: () -> Unit,
-    onScheduleNotifications: (Boolean) -> Unit,
     onToggleEventCritical: (Long, Boolean) -> Unit,
     onDismissError: () -> Unit,
     onUpdateEventDistance: (String, Boolean, String) -> Unit
 ) {
     var showTomorrowSummary by remember { mutableStateOf(false) }
-    var isSarcasticMode by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -343,8 +351,8 @@ fun MainScreen(
                     ) {
                         Text("😏", fontSize = 20.sp)
                         Switch(
-                            checked = isSarcasticMode,
-                            onCheckedChange = { isSarcasticMode = it },
+                            checked = dayPlan?.sarcasticMode ?: false,
+                            onCheckedChange = { /* TODO: Implementar toggle sarcástico */ },
                             modifier = Modifier.padding(horizontal = 4.dp)
                         )
                     }
@@ -401,29 +409,57 @@ fun MainScreen(
                                             fontWeight = FontWeight.Bold
                                         )
                                         Text(
-                                            "Próximo checkeo: ${currentPlan?.proximoCheckeo ?: "--:--"}",
+                                            "Próximo checkeo: ${dayPlan?.nextCheckTime ?: "--:--"}",
                                             style = MaterialTheme.typography.bodySmall
                                         )
                                     }
 
-                                    currentPlan?.eventosCriticosPendientes?.let { criticos ->
-                                        if (criticos.isNotEmpty()) {
-                                            Spacer(Modifier.height(8.dp))
-                                            Text(
-                                                "⚠️ Eventos críticos pendientes: ${criticos.size}",
-                                                color = MaterialTheme.colorScheme.error,
-                                                style = MaterialTheme.typography.bodySmall
-                                            )
-                                        }
+                                    // Mostrar conflictos si hay
+                                    if (conflicts.isNotEmpty()) {
+                                        Spacer(Modifier.height(8.dp))
+                                        Text(
+                                            "⚠️ Conflictos detectados: ${conflicts.size}",
+                                            color = MaterialTheme.colorScheme.error,
+                                            style = MaterialTheme.typography.bodySmall
+                                        )
                                     }
 
-                                    // Mostrar si el plan está cargado
-                                    if (currentPlan != null) {
+                                    // Mostrar eventos monitoreados
+                                    if (eventPlans.isNotEmpty()) {
                                         Spacer(Modifier.height(4.dp))
                                         Text(
-                                            "📅 ${currentPlan.eventosHoy.size} eventos monitoreados",
+                                            "📅 ${eventPlans.size} eventos monitoreados",
                                             style = MaterialTheme.typography.bodySmall
                                         )
+                                    }
+                                }
+                            }
+                        }
+
+                        // Mostrar conflictos activos
+                        if (conflicts.isNotEmpty()) {
+                            item {
+                                Card(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = MaterialTheme.colorScheme.errorContainer
+                                    )
+                                ) {
+                                    Column(modifier = Modifier.padding(16.dp)) {
+                                        Text(
+                                            "⚠️ Conflictos Detectados",
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onErrorContainer
+                                        )
+                                        Spacer(Modifier.height(8.dp))
+                                        conflicts.forEach { conflict ->
+                                            Text(
+                                                conflict.getUserMessage(),
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                                modifier = Modifier.padding(vertical = 2.dp)
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -507,18 +543,24 @@ fun MainScreen(
 
                         // Lista de eventos
                         items(todayEvents) { event ->
-                            EventCardEnhanced(
+                            val eventPlan = eventPlans.find {
+                                it.calendarEventId == event.id
+                            }
+
+                            EventCardWithRoom(
                                 event = event,
-                                planEvent = currentPlan?.eventosHoy?.find { it.id == event.id.toString() },
+                                eventPlan = eventPlan,
                                 onToggleCritical = {
                                     onToggleEventCritical(event.id, !event.isCritical)
                                 },
                                 onUpdateDistance = { distance ->
-                                    onUpdateEventDistance(
-                                        event.id.toString(),
-                                        event.isCritical,
-                                        distance
-                                    )
+                                    eventPlan?.let {
+                                        onUpdateEventDistance(
+                                            it.eventId,
+                                            event.isCritical,
+                                            distance
+                                        )
+                                    }
                                 }
                             )
                         }
@@ -576,14 +618,11 @@ fun MainScreen(
     }
 }
 
-// ... El resto del código sigue igual (EventCardEnhanced, EventCard, PermissionRequestScreen)
-// Los incluyo por completitud:
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun EventCardEnhanced(
+fun EventCardWithRoom(
     event: CalendarEvent,
-    planEvent: EventoConNotificaciones?,
+    eventPlan: EventPlan?,
     onToggleCritical: () -> Unit,
     onUpdateDistance: (String) -> Unit
 ) {
@@ -595,7 +634,7 @@ fun EventCardEnhanced(
         colors = CardDefaults.cardColors(
             containerColor = when {
                 event.isCritical -> Color(0xFFFFEBEE)
-                planEvent?.conflicto != null -> Color(0xFFFFF3E0) // Amarillo si hay conflicto
+                eventPlan?.hasConflict == true -> Color(0xFFFFF3E0)
                 else -> MaterialTheme.colorScheme.surface
             }
         )
@@ -637,16 +676,16 @@ fun EventCardEnhanced(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
 
-                            planEvent?.distancia?.let { dist ->
+                            eventPlan?.let { plan ->
                                 Spacer(Modifier.width(8.dp))
                                 AssistChip(
                                     onClick = { showDistanceDialog = true },
                                     label = {
                                         Text(
-                                            when(dist) {
-                                                "lejos" -> "🚗 Lejos"
-                                                "cerca" -> "🚶 Cerca"
-                                                else -> "🏢 En la ofi"
+                                            when(plan.distance) {
+                                                EventDistance.LEJOS -> "🚗 Lejos"
+                                                EventDistance.CERCA -> "🚶 Cerca"
+                                                EventDistance.EN_OFI -> "🏢 En la ofi"
                                             },
                                             style = MaterialTheme.typography.labelSmall
                                         )
@@ -668,30 +707,11 @@ fun EventCardEnhanced(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
 
-                        planEvent?.avisosSugeridos?.let { avisos ->
+                        eventPlan?.let { plan ->
                             Text(
-                                text = "🔔 ${avisos.joinToString(", ")} min antes",
+                                text = "🔔 ${plan.getNotificationMinutesList().joinToString(", ")} min antes",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-
-                    // Mostrar conflicto si existe
-                    planEvent?.conflicto?.let { conflicto ->
-                        Card(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(top = 8.dp),
-                            colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.errorContainer
-                            )
-                        ) {
-                            Text(
-                                text = "⚠️ ${conflicto.mensaje}",
-                                modifier = Modifier.padding(8.dp),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onErrorContainer
                             )
                         }
                     }
@@ -750,89 +770,6 @@ fun EventCardEnhanced(
                 }
             }
         )
-    }
-}
-
-// EventCard original para compatibilidad (cuando no hay plan)
-@Composable
-fun EventCard(
-    event: CalendarEvent,
-    onToggleCritical: () -> Unit
-) {
-    val timeFormatter = DateTimeFormatter.ofPattern("HH:mm")
-
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = if (event.isCritical)
-                Color(0xFFFFEBEE)
-            else
-                MaterialTheme.colorScheme.surface
-        )
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                // Hora y título
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (event.isCritical) {
-                        Text("🚨 ", fontSize = 20.sp)
-                    }
-                    Text(
-                        text = event.startTime.format(timeFormatter),
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                    Text(" - ")
-                    Text(
-                        text = event.title,
-                        fontWeight = FontWeight.Medium
-                    )
-                }
-
-                // Ubicación
-                event.location?.let {
-                    Text(
-                        text = "📍 $it",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 4.dp)
-                    )
-                }
-
-                // Duración
-                Text(
-                    text = "⏱️ ${event.durationInMinutes} minutos",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-
-            // Botón crítico
-            IconButton(
-                onClick = onToggleCritical,
-                colors = IconButtonDefaults.iconButtonColors(
-                    containerColor = if (event.isCritical)
-                        MaterialTheme.colorScheme.error
-                    else
-                        MaterialTheme.colorScheme.secondaryContainer
-                )
-            ) {
-                Icon(
-                    Icons.Default.Warning,
-                    contentDescription = if (event.isCritical) "Quitar crítico" else "Marcar crítico",
-                    tint = if (event.isCritical)
-                        MaterialTheme.colorScheme.onError
-                    else
-                        MaterialTheme.colorScheme.onSecondaryContainer
-                )
-            }
-        }
     }
 }
 

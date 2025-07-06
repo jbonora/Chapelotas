@@ -1,6 +1,7 @@
 package com.chapelotas.app.data.notifications
 
 import android.app.*
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.os.Build
@@ -9,21 +10,25 @@ import android.os.PowerManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.chapelotas.app.R
-import com.chapelotas.app.domain.usecases.MonkeyCheckerService
+import com.chapelotas.app.domain.events.ChapelotasEvent
+import com.chapelotas.app.domain.events.ChapelotasEventBus
+import com.chapelotas.app.domain.usecases.UnifiedMonkeyService
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
 import javax.inject.Inject
-import android.content.BroadcastReceiver
 
 /**
  * Servicio ultra-persistente estilo WhatsApp
- * Casi imposible de matar
+ * ACTUALIZADO para usar UnifiedMonkeyService con Room
  */
 @AndroidEntryPoint
 class ChapelotasNotificationService : Service() {
 
     @Inject
-    lateinit var monkeyChecker: MonkeyCheckerService
+    lateinit var unifiedMonkey: UnifiedMonkeyService
+
+    @Inject
+    lateinit var eventBus: ChapelotasEventBus
 
     private val serviceScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
     private var wakeLock: PowerManager.WakeLock? = null
@@ -31,7 +36,7 @@ class ChapelotasNotificationService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        Log.d("ChapelotasService", "🚀 Servicio creado")
+        Log.d("ChapelotasService", "🚀 Servicio creado - Room Edition")
 
         // Adquirir WakeLock parcial para mantener CPU activa
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
@@ -41,6 +46,9 @@ class ChapelotasNotificationService : Service() {
         ).apply {
             acquire(10*60*1000L) // 10 minutos, se renueva automáticamente
         }
+
+        // Emitir evento de servicio iniciado
+        eventBus.tryEmit(ChapelotasEvent.ServiceStarted("ChapelotasNotificationService"))
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -49,7 +57,7 @@ class ChapelotasNotificationService : Service() {
         if (!isServiceStarted) {
             isServiceStarted = true
             startForegroundService()
-            startMonkeyWithRetry()
+            startMonkey()
             scheduleRestartAlarm() // Por si Android lo mata
         }
 
@@ -61,6 +69,12 @@ class ChapelotasNotificationService : Service() {
 
     override fun onDestroy() {
         Log.w("ChapelotasService", "⚠️ Servicio destruido - Programando reinicio...")
+
+        // Emitir evento
+        eventBus.tryEmit(ChapelotasEvent.ServiceStopped(
+            serviceName = "ChapelotasNotificationService",
+            reason = "Android killed service"
+        ))
 
         // Liberar recursos
         wakeLock?.release()
@@ -150,22 +164,32 @@ class ChapelotasNotificationService : Service() {
     }
 
     /**
-     * Iniciar el mono con reintentos
+     * Iniciar el mono unificado con Room
      */
-    private fun startMonkeyWithRetry() {
+    private fun startMonkey() {
         serviceScope.launch {
-            var retryCount = 0
-            while (isActive && retryCount < 5) {
-                try {
-                    delay(3000) // Esperar que todo se inicialice
-                    monkeyChecker.startMonkey()
-                    Log.d("ChapelotasService", "🐵 Mono iniciado exitosamente")
-                    break
-                } catch (e: Exception) {
-                    retryCount++
-                    Log.e("ChapelotasService", "Error iniciando mono, intento $retryCount", e)
-                    delay(5000L * retryCount) // Backoff exponencial
-                }
+            try {
+                // Esperar un poco para que todo se inicialice
+                delay(3000)
+
+                Log.d("ChapelotasService", "🐵 Iniciando Mono Unificado con Room...")
+                unifiedMonkey.startMonkey()
+
+                Log.d("ChapelotasService", "✅ Mono iniciado exitosamente")
+
+            } catch (e: Exception) {
+                Log.e("ChapelotasService", "❌ Error iniciando mono", e)
+
+                // Emitir evento de error
+                eventBus.tryEmit(ChapelotasEvent.MonkeyError(
+                    error = e.message ?: "Unknown error",
+                    willRetry = true,
+                    retryInSeconds = 30
+                ))
+
+                // Reintentar en 30 segundos
+                delay(30_000)
+                startMonkey()
             }
         }
     }
@@ -209,16 +233,19 @@ class ChapelotasNotificationService : Service() {
 
 /**
  * Receiver para reiniciar el servicio
+ * DEBE ESTAR EN EL MISMO ARCHIVO
  */
 class RestartServiceReceiver : BroadcastReceiver() {
-    override fun onReceive(context: Context, intent: Intent) {
+    override fun onReceive(context: Context?, intent: Intent?) {
         Log.d("RestartReceiver", "🔄 Reiniciando servicio...")
 
-        val serviceIntent = Intent(context, ChapelotasNotificationService::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            context.startForegroundService(serviceIntent)
-        } else {
-            context.startService(serviceIntent)
+        context?.let { ctx ->
+            val serviceIntent = Intent(ctx, ChapelotasNotificationService::class.java)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                ctx.startForegroundService(serviceIntent)
+            } else {
+                ctx.startService(serviceIntent)
+            }
         }
     }
 }
