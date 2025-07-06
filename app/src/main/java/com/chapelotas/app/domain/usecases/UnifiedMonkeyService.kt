@@ -6,6 +6,7 @@ import com.chapelotas.app.data.database.ChapelotasDatabase
 import com.chapelotas.app.data.database.entities.*
 import com.chapelotas.app.domain.events.ChapelotasEvent
 import com.chapelotas.app.domain.events.ChapelotasEventBus
+import com.chapelotas.app.domain.repositories.AIRepository
 import com.chapelotas.app.domain.repositories.NotificationRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.*
@@ -27,6 +28,7 @@ class UnifiedMonkeyService @Inject constructor(
     private val eventBus: ChapelotasEventBus,
     private val notificationRepository: NotificationRepository,
     private val masterPlanController: MasterPlanController,
+    private val aiRepository: AIRepository,
     private val scope: CoroutineScope
 ) {
     companion object {
@@ -230,7 +232,7 @@ class UnifiedMonkeyService @Inject constructor(
             } else ""
 
             // Llamar a la IA (reutilizando el método existente)
-            masterPlanController.callOpenAIForText(
+            aiRepository.callOpenAIForText(
                 prompt = """
                     Sos Chapelotas, secretaria ejecutiva de ${plan.userName.ifEmpty { "este usuario" }}.
                     ${if (plan.sarcasticMode) "Modo: sarcástico argentino" else "Modo: profesional"}

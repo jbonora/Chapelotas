@@ -3,6 +3,8 @@ package com.chapelotas.app.domain.events
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.filter // Import the filter operator
+import kotlinx.coroutines.flow.map    // Import the map operator
 import java.time.LocalDateTime
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -208,8 +210,8 @@ sealed class ChapelotasEvent {
  */
 inline fun <reified T : ChapelotasEvent> SharedFlow<ChapelotasEvent>.filterEvent(): kotlinx.coroutines.flow.Flow<T> {
     return this
-        .filter { it is T }
-        .map { it as T }
+        .filter { it is T } // Now correctly resolves to kotlinx.coroutines.flow.filter
+        .map { it as T }    // Now correctly resolves to kotlinx.coroutines.flow.map
 }
 
 /**
