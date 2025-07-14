@@ -1,8 +1,25 @@
 package com.chapelotas.app.data.database.entities
 
-/**
- * Enums compartidos para la base de datos
- */
+enum class UserAction {
+    OPENED,
+    DISMISSED,
+    SNOOZED,
+    MARKED_DONE,
+    IGNORED
+}
+
+enum class EventResolutionStatus {
+    PENDING,
+    COMPLETED,
+    MISSED_ACKNOWLEDGED,
+    CANCELLED
+}
+
+enum class ConflictSeverity {
+    LOW,
+    MEDIUM,
+    HIGH
+}
 
 enum class EventDistance(val displayName: String, val minutesBefore: Int) {
     EN_OFI("En la oficina", 10),
@@ -10,19 +27,16 @@ enum class EventDistance(val displayName: String, val minutesBefore: Int) {
     LEJOS("Lejos (transporte)", 60);
 
     companion object {
-        fun fromString(value: String): EventDistance {
-            return when(value.lowercase()) {
-                "en la ofi" -> EN_OFI
-                "cerca" -> CERCA
-                "lejos" -> LEJOS
-                else -> CERCA
-            }
+        fun fromString(value: String?): EventDistance {
+            if (value == null) return CERCA
+            return entries.find { it.name.equals(value, ignoreCase = true) || it.displayName.equals(value, ignoreCase = true) }
+                ?: CERCA
         }
     }
 }
 
 enum class NotificationType {
-    REMINDER,
+    EVENT_REMINDER,
     CRITICAL_ALERT,
     PREPARATION_TIP,
     CONFLICT_ALERT,
@@ -31,9 +45,9 @@ enum class NotificationType {
 }
 
 enum class ConflictType {
-    OVERLAPPING,    // Eventos que se superponen
-    TOO_CLOSE,      // Eventos muy seguidos (sin tiempo de traslado)
-    SAME_LOCATION   // Mismo lugar al mismo tiempo
+    OVERLAPPING,
+    TOO_CLOSE,
+    SAME_LOCATION
 }
 
 enum class NotificationPriority {

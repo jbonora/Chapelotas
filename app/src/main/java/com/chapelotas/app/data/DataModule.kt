@@ -1,11 +1,15 @@
 package com.chapelotas.app.data
 
 import android.content.Context
+import androidx.core.app.NotificationManagerCompat
+import androidx.room.Room
 import com.chapelotas.app.data.ai.AIRepositoryImpl
 import com.chapelotas.app.data.calendar.CalendarRepositoryImpl
 import com.chapelotas.app.data.database.ChapelotasDatabase
 import com.chapelotas.app.data.database.daos.*
 import com.chapelotas.app.data.notifications.NotificationRepositoryImpl
+import com.chapelotas.app.data.preferences.PreferencesRepositoryImpl
+import com.chapelotas.app.di.ApplicationScope
 import com.chapelotas.app.domain.events.ChapelotasEventBus
 import com.chapelotas.app.domain.repositories.AIRepository
 import com.chapelotas.app.domain.repositories.CalendarRepository
@@ -25,109 +29,98 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import javax.inject.Singleton
 
-/**
- * Módulo de Hilt - VERSIÓN FINAL con Room y todos los servicios
- */
 @Module
 @InstallIn(SingletonComponent::class)
 abstract class DataModule {
 
     @Binds
     @Singleton
-    abstract fun bindCalendarRepository(
-        calendarRepositoryImpl: CalendarRepositoryImpl
-    ): CalendarRepository
+    abstract fun bindCalendarRepository(impl: CalendarRepositoryImpl): CalendarRepository
 
     @Binds
     @Singleton
-    abstract fun bindNotificationRepository(
-        notificationRepositoryImpl: NotificationRepositoryImpl
-    ): NotificationRepository
+    abstract fun bindNotificationRepository(impl: NotificationRepositoryImpl): NotificationRepository
 
     @Binds
     @Singleton
-    abstract fun bindAIRepository(
-        aiRepositoryImpl: AIRepositoryImpl
-    ): AIRepository
+    abstract fun bindAIRepository(impl: AIRepositoryImpl): AIRepository
 
     @Binds
     @Singleton
-    abstract fun bindPreferencesRepository(
-        preferencesRepositoryImpl: PreferencesRepositoryImpl
-    ): PreferencesRepository
+    abstract fun bindPreferencesRepository(impl: PreferencesRepositoryImpl): PreferencesRepository
 
     companion object {
-
-        // ===== ROOM DATABASE =====
         @Provides
         @Singleton
-        fun provideDatabase(
-            @ApplicationContext context: Context
-        ): ChapelotasDatabase {
-            return ChapelotasDatabase.getDatabase(
-                context,
-                CoroutineScope(SupervisorJob() + Dispatchers.IO)
-            )
+        fun provideDatabase(@ApplicationContext context: Context): ChapelotasDatabase {
+            return Room.databaseBuilder(context, ChapelotasDatabase::class.java, "chapelotas_database")
+                .fallbackToDestructiveMigration()
+                .build()
         }
 
         @Provides
         @Singleton
-        fun provideDayPlanDao(database: ChapelotasDatabase): DayPlanDao {
-            return database.dayPlanDao()
+        fun provideDayPlanDao(db: ChapelotasDatabase): DayPlanDao = db.dayPlanDao()
+
+        @Provides
+        @Singleton
+        fun provideEventPlanDao(db: ChapelotasDatabase): EventPlanDao = db.eventPlanDao()
+
+        @Provides
+        @Singleton
+        fun provideNotificationDao(db: ChapelotasDatabase): NotificationDao = db.notificationDao()
+
+        @Provides
+        @Singleton
+        fun provideConflictDao(db: ChapelotasDatabase): ConflictDao = db.conflictDao()
+
+        @Provides
+        @Singleton
+        fun provideNotificationLogDao(db: ChapelotasDatabase): NotificationLogDao = db.notificationLogDao()
+
+        @Provides
+        @Singleton
+        fun provideConversationLogDao(db: ChapelotasDatabase): ConversationLogDao = db.conversationLogDao()
+
+        @Provides
+        @Singleton
+        fun provideMonkeyAgendaDao(database: ChapelotasDatabase): MonkeyAgendaDao {
+            return database.monkeyAgendaDao()
         }
 
         @Provides
         @Singleton
-        fun provideEventPlanDao(database: ChapelotasDatabase): EventPlanDao {
-            return database.eventPlanDao()
+        fun provideChatThreadDao(database: ChapelotasDatabase): ChatThreadDao {
+            return database.chatThreadDao()
         }
 
         @Provides
         @Singleton
-        fun provideNotificationDao(database: ChapelotasDatabase): NotificationDao {
-            return database.notificationDao()
-        }
+        fun provideGson(): Gson = GsonBuilder().create()
 
         @Provides
         @Singleton
-        fun provideConflictDao(database: ChapelotasDatabase): ConflictDao {
-            return database.conflictDao()
-        }
+        @ApplicationScope
+        fun provideApplicationScope(): CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
         @Provides
         @Singleton
-        fun provideNotificationLogDao(database: ChapelotasDatabase): NotificationLogDao {
-            return database.notificationLogDao()
-        }
-
-        // ===== CORE SERVICES =====
-        @Provides
-        @Singleton
-        fun provideGson(): Gson {
-            return GsonBuilder()
-                .create()
-        }
+        fun provideEventBus(): ChapelotasEventBus = ChapelotasEventBus()
 
         @Provides
         @Singleton
-        fun provideApplicationScope(): CoroutineScope {
-            return CoroutineScope(SupervisorJob() + Dispatchers.Default)
-        }
-
-        @Provides
-        @Singleton
-        fun provideEventBus(): ChapelotasEventBus {
-            return ChapelotasEventBus()
-        }
-
-        // ===== USE CASES =====
-        @Provides
-        @Singleton
-        fun provideMasterPlanController(
+        fun provideMonkeyAgendaService(
+            database: ChapelotasDatabase,
+            notificationRepository: NotificationRepository,
             aiRepository: AIRepository,
-            gson: Gson
-        ): MasterPlanController {
-            return MasterPlanController(aiRepository, gson)
+            @ApplicationScope scope: CoroutineScope
+        ): MonkeyAgendaService {
+            return MonkeyAgendaService(
+                database = database,
+                notificationRepository = notificationRepository,
+                aiRepository = aiRepository,
+                scope = scope
+            )
         }
 
         @Provides
@@ -136,18 +129,9 @@ abstract class DataModule {
             @ApplicationContext context: Context,
             database: ChapelotasDatabase,
             eventBus: ChapelotasEventBus,
-            notificationRepository: NotificationRepository,
-            masterPlanController: MasterPlanController,
-            scope: CoroutineScope
+            monkeyAgendaService: MonkeyAgendaService
         ): UnifiedMonkeyService {
-            return UnifiedMonkeyService(
-                context = context,
-                database = database,
-                eventBus = eventBus,
-                notificationRepository = notificationRepository,
-                masterPlanController = masterPlanController,
-                scope = scope
-            )
+            return UnifiedMonkeyService(context, database, eventBus, monkeyAgendaService)
         }
 
         @Provides
@@ -155,40 +139,57 @@ abstract class DataModule {
         fun provideNotificationActionHandler(
             database: ChapelotasDatabase,
             eventBus: ChapelotasEventBus,
-            notificationManagerCompat: androidx.core.app.NotificationManagerCompat,
-            scope: CoroutineScope
+            notificationManager: NotificationManagerCompat,
+            @ApplicationScope scope: CoroutineScope
         ): NotificationActionHandler {
-            return NotificationActionHandler(
+            return NotificationActionHandler(database, eventBus, notificationManager, scope)
+        }
+
+        @Provides
+        @Singleton
+        fun provideNotificationManagerCompat(@ApplicationContext context: Context): NotificationManagerCompat {
+            return NotificationManagerCompat.from(context)
+        }
+
+        @Provides
+        @Singleton
+        fun provideProcessAIPlansUseCase(
+            database: ChapelotasDatabase,
+            aiRepository: AIRepository,
+            unifiedMonkeyService: UnifiedMonkeyService
+        ): ProcessAIPlansUseCase {
+            return ProcessAIPlansUseCase(
                 database = database,
-                eventBus = eventBus,
-                notificationManager = notificationManagerCompat,
-                scope = scope
+                aiRepository = aiRepository,
+                unifiedMonkey = unifiedMonkeyService
             )
         }
 
         @Provides
         @Singleton
-        fun provideNotificationManagerCompat(
-            @ApplicationContext context: Context
-        ): androidx.core.app.NotificationManagerCompat {
-            return androidx.core.app.NotificationManagerCompat.from(context)
+        fun provideMigrateToMonkeyAgendaUseCase(
+            database: ChapelotasDatabase,
+            monkeyAgendaService: MonkeyAgendaService
+        ): MigrateToMonkeyAgendaUseCase {
+            return MigrateToMonkeyAgendaUseCase(database, monkeyAgendaService)
         }
 
-        // ===== LEGACY - Para compatibilidad temporal =====
         @Provides
         @Singleton
-        fun provideMonkeyCheckerService(
-            @ApplicationContext context: Context,
-            masterPlanController: MasterPlanController,
-            notificationRepository: NotificationRepository,
-            gson: Gson
-        ): MonkeyCheckerService {
-            return MonkeyCheckerService(
-                context = context,
-                masterPlanController = masterPlanController,
-                notificationRepository = notificationRepository,
-                gson = gson
-            )
+        fun provideInitializeChatThreadsUseCase(
+            database: ChapelotasDatabase
+        ): InitializeChatThreadsUseCase {
+            return InitializeChatThreadsUseCase(database)
+        }
+
+        @Provides
+        @Singleton
+        fun provideCalendarSyncUseCase(
+            calendarRepository: CalendarRepository,
+            database: ChapelotasDatabase,
+            eventBus: ChapelotasEventBus
+        ): CalendarSyncUseCase {
+            return CalendarSyncUseCase(calendarRepository, database, eventBus)
         }
     }
 }

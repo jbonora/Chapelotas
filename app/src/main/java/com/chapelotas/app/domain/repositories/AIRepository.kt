@@ -1,23 +1,33 @@
 package com.chapelotas.app.domain.repositories
 
+import com.chapelotas.app.data.ai.AIEventPlan
 import com.chapelotas.app.domain.entities.AIPlan
 import com.chapelotas.app.domain.entities.CalendarEvent
+import com.chapelotas.app.domain.entities.PlannedNotification
 
 /**
  * Repositorio para interactuar con el servicio de IA
  */
 interface AIRepository {
 
+    // --- NUEVO MÉTODO PARA ANÁLISIS BATCH ---
     /**
-     * Genera un plan de comunicación basado en los eventos del día
-     * @param events Lista de eventos a analizar
-     * @param userContext Contexto adicional del usuario (preferencias, historial, etc.)
-     * @return Plan de notificaciones generado por la IA
+     * Analiza una lista de eventos del día y devuelve un plan completo.
+     * @param events La lista de eventos a analizar.
+     * @return Un mapa donde la clave es el ID del evento y el valor es el plan de la IA.
      */
+    suspend fun createDailyPlanBatch(events: List<CalendarEvent>): Map<Long, AIEventPlan>
+
+
+    @Deprecated("Usar createDailyPlanBatch para un análisis contextual completo.")
+    suspend fun createIntelligentEventPlan(event: CalendarEvent): List<PlannedNotification>
+
+
     suspend fun generateCommunicationPlan(
         events: List<CalendarEvent>,
         userContext: String? = null
     ): AIPlan
+
     suspend fun callOpenAIForJSON(
         prompt: String,
         temperature: Double = 0.3
@@ -28,14 +38,6 @@ interface AIRepository {
         temperature: Double = 0.7
     ): String
 
-
-    /**
-     * Genera un mensaje personalizado para una notificación
-     * @param event Evento sobre el cual notificar
-     * @param messageType Tipo de mensaje a generar
-     * @param isSarcastic Si debe usar tono sarcástico
-     * @param additionalContext Contexto adicional para personalizar el mensaje
-     */
     suspend fun generateNotificationMessage(
         event: CalendarEvent,
         messageType: String,
@@ -43,55 +45,29 @@ interface AIRepository {
         additionalContext: String? = null
     ): String
 
-    /**
-     * Genera el resumen del día
-     * @param todayEvents Eventos de hoy
-     * @param isSarcastic Si debe usar tono sarcástico
-     */
     suspend fun generateDailySummary(
         todayEvents: List<CalendarEvent>,
         isSarcastic: Boolean = false
     ): String
 
-    /**
-     * Genera el resumen de mañana
-     * @param tomorrowEvents Eventos de mañana
-     * @param todayContext Contexto de lo que pasó hoy
-     * @param isSarcastic Si debe usar tono sarcástico
-     */
     suspend fun generateTomorrowSummary(
         tomorrowEvents: List<CalendarEvent>,
         todayContext: String? = null,
         isSarcastic: Boolean = false
     ): String
 
-    /**
-     * Analiza si un evento debería ser crítico basado en su contenido
-     * @param event Evento a analizar
-     * @param userHistory Historial de eventos críticos previos
-     */
     suspend fun suggestCriticalEvents(
         event: CalendarEvent,
         userHistory: List<CalendarEvent>? = null
     ): Boolean
 
-    /**
-     * Genera un mensaje de preparación inteligente
-     * Por ejemplo: "Acordate de llevar paraguas, hay 80% de lluvia"
-     */
     suspend fun generatePreparationTips(
         event: CalendarEvent,
         weatherInfo: String? = null,
         trafficInfo: String? = null
     ): String?
 
-    /**
-     * Verifica la conectividad con el servicio de IA
-     */
     suspend fun testConnection(): Boolean
 
-    /**
-     * Obtiene el modelo de IA actual en uso
-     */
     suspend fun getCurrentModel(): String
 }

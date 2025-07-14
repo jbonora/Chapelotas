@@ -1,173 +1,65 @@
 package com.chapelotas.app.data.database.daos
 
 import androidx.room.*
-import com.chapelotas.app.data.database.entities.EventPlan
 import com.chapelotas.app.data.database.entities.EventDistance
+import com.chapelotas.app.data.database.entities.EventPlan
+import com.chapelotas.app.data.database.entities.EventResolutionStatus
 import kotlinx.coroutines.flow.Flow
 import java.time.LocalDate
 import java.time.LocalDateTime
 
-/**
- * DAO para operaciones con planes de eventos
- */
 @Dao
 interface EventPlanDao {
 
-    // ===== INSERT =====
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(eventPlan: EventPlan)
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertAll(eventPlans: List<EventPlan>)
-
-    // ===== UPDATE =====
     @Update
     suspend fun update(eventPlan: EventPlan)
 
-    @Query("""
-        UPDATE event_plans 
-        SET isCritical = :critical, updatedAt = datetime('now') 
-        WHERE eventId = :eventId
-    """)
-    suspend fun updateCritical(eventId: String, critical: Boolean)
+    @Query("SELECT * FROM event_plans WHERE eventId = :id LIMIT 1")
+    suspend fun getEvent(id: String): EventPlan?
 
-    @Query("""
-        UPDATE event_plans 
-        SET distance = :distance, updatedAt = datetime('now') 
-        WHERE eventId = :eventId
-    """)
-    suspend fun updateDistance(eventId: String, distance: EventDistance)
+    @Query("SELECT * FROM event_plans WHERE dayDate = :date ORDER BY startTime ASC")
+    suspend fun getEventsByDate(date: LocalDate): List<EventPlan>
 
-    @Query("""
-        UPDATE event_plans 
-        SET suggestedNotificationMinutes = :minutes, updatedAt = datetime('now') 
-        WHERE eventId = :eventId
-    """)
-    suspend fun updateNotificationMinutes(eventId: String, minutes: String)
+    @Query("SELECT * FROM event_plans WHERE dayDate = :today ORDER BY startTime ASC")
+    fun observeTodayEvents(today: LocalDate = LocalDate.now()): Flow<List<EventPlan>>
 
-    @Query("""
-        UPDATE event_plans 
-        SET hasConflict = :hasConflict, updatedAt = datetime('now') 
-        WHERE eventId = :eventId
-    """)
-    suspend fun updateConflictStatus(eventId: String, hasConflict: Boolean)
-
-    @Query("""
-        UPDATE event_plans 
-        SET notificationsSent = notificationsSent + 1,
-            lastNotificationTime = :time
-        WHERE eventId = :eventId
-    """)
-    suspend fun incrementNotificationCount(eventId: String, time: LocalDateTime)
-
-    // ===== DELETE =====
-    @Delete
-    suspend fun delete(eventPlan: EventPlan)
-
-    @Query("DELETE FROM event_plans WHERE eventId = :eventId")
-    suspend fun deleteById(eventId: String)
+    @Query("SELECT * FROM event_plans WHERE dayDate = :today AND isCritical = 1 ORDER BY startTime ASC")
+    suspend fun getTodayCriticalEvents(today: LocalDate = LocalDate.now()): List<EventPlan>
 
     @Query("DELETE FROM event_plans WHERE dayDate < :beforeDate")
     suspend fun deleteOldEvents(beforeDate: LocalDate)
 
-    // ===== QUERIES - Single =====
-    @Query("SELECT * FROM event_plans WHERE eventId = :eventId LIMIT 1")
-    suspend fun getEvent(eventId: String): EventPlan?
+    @Query("DELETE FROM event_plans WHERE dayDate = :date")
+    suspend fun deleteAllByDate(date: LocalDate)
 
-    @Query("SELECT * FROM event_plans WHERE eventId = :eventId LIMIT 1")
-    fun observeEvent(eventId: String): Flow<EventPlan?>
+    @Query("DELETE FROM event_plans WHERE eventId = :eventId")
+    suspend fun deleteById(eventId: String)
 
-    // ===== QUERIES - Today =====
-    @Query("""
-        SELECT * FROM event_plans 
-        WHERE dayDate = date('now', 'localtime') 
-        ORDER BY startTime ASC
-    """)
-    suspend fun getTodayEvents(): List<EventPlan>
+    // ACTUALIZADO: Ahora marca userModified = 1 cuando el usuario cambia la criticidad
+    @Query("UPDATE event_plans SET isCritical = :isCritical, userModified = 1, updatedAt = :now WHERE eventId = :eventId")
+    suspend fun updateCritical(eventId: String, isCritical: Boolean, now: LocalDateTime = LocalDateTime.now())
 
-    @Query("""
-        SELECT * FROM event_plans 
-        WHERE dayDate = date('now', 'localtime') 
-        ORDER BY startTime ASC
-    """)
-    fun observeTodayEvents(): Flow<List<EventPlan>>
+    // ACTUALIZADO: Ahora marca userModified = 1 cuando el usuario cambia la distancia
+    @Query("UPDATE event_plans SET distance = :distance, userModified = 1, updatedAt = :now WHERE eventId = :eventId")
+    suspend fun updateDistance(eventId: String, distance: EventDistance, now: LocalDateTime = LocalDateTime.now())
 
-    @Query("""
-        SELECT * FROM event_plans 
-        WHERE dayDate = date('now', 'localtime') 
-        AND isCritical = 1
-        ORDER BY startTime ASC
-    """)
-    suspend fun getTodayCriticalEvents(): List<EventPlan>
+    @Query("SELECT * FROM event_plans WHERE endTime < :currentTime AND resolutionStatus = 'PENDING' ORDER BY startTime DESC")
+    suspend fun getPastUnresolvedEvents(currentTime: LocalDateTime = LocalDateTime.now()): List<EventPlan>
 
-    @Query("""
-        SELECT * FROM event_plans 
-        WHERE dayDate = date('now', 'localtime')
-        AND datetime(startTime) > datetime('now')
-        ORDER BY startTime ASC
-        LIMIT 1
-    """)
-    suspend fun getNextEvent(): EventPlan?
+    @Query("UPDATE event_plans SET resolutionStatus = :status, updatedAt = :now WHERE eventId = :eventId")
+    suspend fun updateResolutionStatus(eventId: String, status: EventResolutionStatus, now: LocalDateTime = LocalDateTime.now())
 
-    // ===== QUERIES - Tomorrow =====
-    @Query("""
-        SELECT * FROM event_plans 
-        WHERE dayDate = date('now', '+1 day', 'localtime') 
-        ORDER BY startTime ASC
-    """)
-    suspend fun getTomorrowEvents(): List<EventPlan>
+    @Query("UPDATE event_plans SET notificationsSent = notificationsSent + 1, lastNotificationTime = :time WHERE eventId = :eventId")
+    suspend fun incrementNotificationCount(eventId: String, time: LocalDateTime)
 
-    @Query("""
-        SELECT * FROM event_plans 
-        WHERE dayDate = date('now', '+1 day', 'localtime') 
-        ORDER BY startTime ASC
-    """)
-    fun observeTomorrowEvents(): Flow<List<EventPlan>>
+    // NUEVO: Actualizar estado del plan de AI
+    @Query("UPDATE event_plans SET aiPlanStatus = :status WHERE eventId = :eventId")
+    suspend fun updateAIPlanStatus(eventId: String, status: String)
 
-    // ===== QUERIES - By Date =====
-    @Query("""
-        SELECT * FROM event_plans 
-        WHERE dayDate = :date 
-        ORDER BY startTime ASC
-    """)
-    suspend fun getEventsByDate(date: LocalDate): List<EventPlan>
-
-    @Query("""
-        SELECT * FROM event_plans 
-        WHERE dayDate = :date 
-        ORDER BY startTime ASC
-    """)
-    fun observeEventsByDate(date: LocalDate): Flow<List<EventPlan>>
-
-    // ===== QUERIES - Conflicts =====
-    @Query("""
-        SELECT * FROM event_plans 
-        WHERE hasConflict = 1 
-        AND dayDate >= date('now', 'localtime')
-        ORDER BY startTime ASC
-    """)
-    suspend fun getEventsWithConflicts(): List<EventPlan>
-
-    // ===== QUERIES - Analytics =====
-    @Query("""
-        SELECT COUNT(*) FROM event_plans 
-        WHERE dayDate = :date AND isCritical = 1
-    """)
-    suspend fun getCriticalCountForDate(date: LocalDate): Int
-
-    @Query("""
-        SELECT COUNT(*) FROM event_plans 
-        WHERE dayDate = :date
-    """)
-    suspend fun getEventCountForDate(date: LocalDate): Int
-
-    // ===== UTILITY =====
-    @Query("""
-        SELECT EXISTS(
-            SELECT 1 FROM event_plans 
-            WHERE calendarEventId = :calendarId 
-            AND dayDate = :date
-        )
-    """)
-    suspend fun existsByCalendarId(calendarId: Long, date: LocalDate): Boolean
+    // NUEVO: Obtener eventos no modificados por el usuario
+    @Query("SELECT * FROM event_plans WHERE userModified = 0 AND dayDate = :date")
+    suspend fun getUnmodifiedEventsByDate(date: LocalDate): List<EventPlan>
 }

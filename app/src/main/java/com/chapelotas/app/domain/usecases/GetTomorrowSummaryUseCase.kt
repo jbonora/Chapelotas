@@ -20,10 +20,9 @@ class GetTomorrowSummaryUseCase @Inject constructor(
             // 1. Obtener preferencias
             val preferences = preferencesRepository.getUserPreferences()
 
+            // --- CORRECCIÓN AQUÍ: Se elimina el filtrado por IDs de calendario ---
             // 2. Obtener eventos de mañana
-            val tomorrowEvents = calendarRepository.getTomorrowEvents(
-                calendarIds = preferences.preferredCalendars.takeIf { it.isNotEmpty() }
-            )
+            val tomorrowEvents = calendarRepository.getTomorrowEvents()
 
             // 3. Obtener eventos críticos
             val criticalEventIds = calendarRepository.getCriticalEventIds()

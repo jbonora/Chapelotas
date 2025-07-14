@@ -3,354 +3,296 @@ package com.chapelotas.app.presentation.viewmodels
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.room.withTransaction
 import com.chapelotas.app.data.database.ChapelotasDatabase
-import com.chapelotas.app.data.database.entities.*
+import com.chapelotas.app.data.database.entities.DayPlan
+import com.chapelotas.app.data.database.entities.EventConflict
+import com.chapelotas.app.data.database.entities.EventResolutionStatus
+import com.chapelotas.app.data.database.entities.ConversationLog
+import com.chapelotas.app.data.database.entities.EventDistance
+import com.chapelotas.app.data.database.entities.EventPlan
+import com.chapelotas.app.data.database.entities.ScheduledNotification
 import com.chapelotas.app.domain.entities.CalendarEvent
 import com.chapelotas.app.domain.events.ChapelotasEvent
 import com.chapelotas.app.domain.events.ChapelotasEventBus
-import com.chapelotas.app.domain.events.filterEvent
 import com.chapelotas.app.domain.repositories.CalendarRepository
-import com.chapelotas.app.domain.usecases.MasterPlanController
+import com.chapelotas.app.domain.usecases.ProcessAIPlansUseCase
 import com.chapelotas.app.domain.usecases.UnifiedMonkeyService
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.LocalDateTime
-import java.time.format.DateTimeFormatter
 import javax.inject.Inject
+import com.chapelotas.app.domain.usecases.CalendarSyncUseCase
+import com.chapelotas.app.domain.usecases.MigrateToMonkeyAgendaUseCase
+import com.chapelotas.app.domain.usecases.InitializeChatThreadsUseCase
 
-/**
- * ViewModel para monitorear el calendario
- * ACTUALIZADO para usar Room en lugar de JSON
- */
+
 @HiltViewModel
 class CalendarMonitorViewModel @Inject constructor(
     private val database: ChapelotasDatabase,
     private val calendarRepository: CalendarRepository,
-    private val masterPlanController: MasterPlanController,
     private val unifiedMonkey: UnifiedMonkeyService,
-    private val eventBus: ChapelotasEventBus
-) : ViewModel() {
+    private val processAIPlansUseCase: ProcessAIPlansUseCase,
+    private val eventBus: ChapelotasEventBus,
+    private val calendarSync: CalendarSyncUseCase,
+    private val migrateToMonkeyAgendaUseCase: MigrateToMonkeyAgendaUseCase, // ← Faltaba
+    private val initializeChatThreadsUseCase: InitializeChatThreadsUseCase   // ← Faltaba
 
-    // Estado del plan del día (desde Room)
-    val currentDayPlan: StateFlow<DayPlan?> = database.dayPlanDao()
-        .observeTodayPlan()
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = null
-        )
+    ) : ViewModel() {
 
-    // Eventos de hoy (desde Room)
-    val todayEvents: StateFlow<List<EventPlan>> = database.eventPlanDao()
-        .observeTodayEvents()
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = emptyList()
-        )
+    val currentDayPlan: StateFlow<DayPlan?> = database.dayPlanDao().observeTodayPlan()
+        .stateIn(scope = viewModelScope, started = SharingStarted.WhileSubscribed(5000), initialValue = null)
 
-    // Conflictos activos
-    val activeConflicts: StateFlow<List<EventConflict>> = database.conflictDao()
-        .observeActiveConflicts()
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = emptyList()
-        )
+    val todayEvents: StateFlow<List<EventPlan>> = database.eventPlanDao().observeTodayEvents()
+        .stateIn(scope = viewModelScope, started = SharingStarted.WhileSubscribed(5000), initialValue = emptyList())
 
-    // Estado del mono
+    val activeConflicts: StateFlow<List<EventConflict>> = database.conflictDao().observeActiveConflicts()
+        .stateIn(scope = viewModelScope, started = SharingStarted.WhileSubscribed(5000), initialValue = emptyList())
+
+    val activeNotifications: StateFlow<List<ScheduledNotification>> = database.notificationDao().observeActiveNotifications()
+        .stateIn(scope = viewModelScope, started = SharingStarted.WhileSubscribed(5000), initialValue = emptyList())
+
     private val _isMonitoring = MutableStateFlow(false)
     val isMonitoring: StateFlow<Boolean> = _isMonitoring.asStateFlow()
 
-    // Próximo check time
-    private val _nextCheckTime = MutableStateFlow<LocalDateTime?>(null)
-    val nextCheckTime: StateFlow<LocalDateTime?> = _nextCheckTime.asStateFlow()
+    val nextCheckTime: StateFlow<LocalDateTime?> = currentDayPlan.map { it?.nextAlarmTime }
+        .stateIn(scope = viewModelScope, started = SharingStarted.WhileSubscribed(5000), initialValue = null)
 
-    init {
-        // Observar eventos del sistema
-        observeSystemEvents()
-
-        // Iniciar el día automáticamente después de un delay
-        viewModelScope.launch {
-            delay(2000) // Dar tiempo a que todo se inicialice
-            if (!_isMonitoring.value) {
-                iniciarDia()
-            }
-        }
-
-        // Observar cambios en el calendario
-        observarCalendario()
+    companion object {
+        const val TAG = "Vigía-ViewModel"
     }
 
-    /**
-     * Iniciar el día - Sincronizar calendario con Room y activar el mono
-     */
+    init {
+        observeSystemEvents()
+    }
+
     fun iniciarDia() {
         if (_isMonitoring.value) {
-            Log.d("CalendarMonitor", "El mono ya está activo")
+            Log.d(TAG, "El día ya está iniciado")
             return
         }
 
         viewModelScope.launch {
             try {
-                Log.d("CalendarMonitor", "🌅 Iniciando el día...")
+                Log.d(TAG, "Iniciando día...")
 
-                // 1. Asegurar que existe el plan del día
-                val dayPlan = database.dayPlanDao().getOrCreateTodayPlan(
-                    userId = "user123", // TODO: Obtener de preferencias
-                    userName = "Usuario" // TODO: Obtener de preferencias
-                )
+                // Crear plan del día si no existe
+                database.dayPlanDao().getOrCreateTodayPlan()
 
-                // 2. Obtener eventos del calendario
-                val calendarEvents = calendarRepository.getTodayEvents()
-                Log.d("CalendarMonitor", "📅 Eventos del calendario: ${calendarEvents.size}")
-
-                // 3. Sincronizar con Room
-                syncCalendarWithRoom(calendarEvents, dayPlan)
-
-                // 4. Análisis inicial con IA
-                if (calendarEvents.isNotEmpty()) {
-                    performInitialAIAnalysis(dayPlan)
+                // NUEVO: Migrar al sistema MonkeyAgenda
+                Log.d(TAG, "Migrando a MonkeyAgenda...")
+                val migrationSuccess = migrateToMonkeyAgendaUseCase()
+                if (!migrationSuccess) {
+                    Log.e(TAG, "Error en migración a MonkeyAgenda")
                 }
 
-                // 5. Iniciar el mono
-                unifiedMonkey.startMonkey()
+                // NUEVO: Inicializar chat threads
+                Log.d(TAG, "Inicializando chat threads...")
+                initializeChatThreadsUseCase()
+
+                // Sincronizar eventos del calendario
+                Log.d(TAG, "Sincronizando calendario...")
+                calendarSync.syncTodayEvents()
+
+                // Actualizar estados
+                refreshEventStates()
+
+
+                // Programar el mono
+                Log.d(TAG, "Programando el mono unificado...")
+                unifiedMonkey.scheduleNextAlarm()
+
                 _isMonitoring.value = true
+                eventBus.tryEmit(ChapelotasEvent.ServiceStarted("CalendarMonitor"))
 
-                Log.d("CalendarMonitor", "✅ Día iniciado exitosamente")
+                Log.d(TAG, "✅ Día iniciado correctamente con nuevo sistema MonkeyAgenda")
 
             } catch (e: Exception) {
-                Log.e("CalendarMonitor", "Error iniciando el día", e)
-                // Reintentar en 5 segundos
-                delay(5000)
-                iniciarDia()
+                Log.e(TAG, "Error al iniciar el día", e)
+                eventBus.tryEmit(ChapelotasEvent.MonkeyError(
+                    error = e.message ?: "Error desconocido",
+                    willRetry = true,
+                    retryInSeconds = 60
+                ))
             }
         }
     }
 
-    /**
-     * Sincronizar eventos del calendario con Room
-     */
-    private suspend fun syncCalendarWithRoom(
-        calendarEvents: List<CalendarEvent>,
-        dayPlan: DayPlan
-    ) {
+    private suspend fun syncCalendarWithRoom(calendarEvents: List<CalendarEvent>) {
+        val today = LocalDate.now()
+        Log.d(TAG, "syncCalendarWithRoom: Sincronizando ${calendarEvents.size} eventos.")
+
         database.withTransaction {
-            // Obtener eventos existentes
-            val existingEvents = database.eventPlanDao().getEventsByDate(dayPlan.date)
-            val existingIds = existingEvents.map { it.calendarEventId }.toSet()
+            val currentEventIds = calendarEvents.map { "${it.id}_$today" }.toSet()
+            val existingPlans = database.eventPlanDao().getEventsByDate(today)
 
-            // Agregar eventos nuevos
-            val newEvents = calendarEvents.filter { it.id !in existingIds }
+            // Eliminar eventos que ya no existen en el calendario
+            existingPlans.filterNot { it.eventId in currentEventIds }.forEach {
+                database.eventPlanDao().deleteById(it.eventId)
+            }
 
-            for (event in newEvents) {
-                val eventPlan = EventPlan(
-                    eventId = "${event.id}_${dayPlan.date}",
-                    dayDate = dayPlan.date,
-                    calendarId = event.calendarId,
-                    calendarEventId = event.id,
-                    title = event.title,
-                    description = event.description,
-                    startTime = event.startTime,
-                    endTime = event.endTime,
-                    location = event.location,
-                    isAllDay = event.isAllDay,
-                    isCritical = event.isCritical,
-                    distance = EventDistance.CERCA // Default
+            // Lista para acumular nuevos eventos
+            val newEvents = mutableListOf<CalendarEvent>()
+
+            // Insertar o actualizar eventos
+            for (event in calendarEvents) {
+                val eventIdWithDate = "${event.id}_$today"
+                var existingPlan = existingPlans.find { it.eventId == eventIdWithDate }
+
+                if (existingPlan == null) {
+                    // Evento nuevo - crear con aiPlanStatus = "AUTO_APPROVED" por defecto
+                    existingPlan = EventPlan(
+                        eventId = eventIdWithDate,
+                        dayDate = today,
+                        calendarId = event.calendarId,
+                        calendarEventId = event.id,
+                        title = event.title,
+                        description = event.description,
+                        startTime = event.startTime,
+                        endTime = event.endTime,
+                        location = event.location,
+                        isAllDay = event.isAllDay,
+                        aiPlanStatus = "AUTO_APPROVED", // AUTO-APROBADO por defecto
+                        userModified = false
+                    )
+                    database.eventPlanDao().insert(existingPlan)
+                    newEvents.add(event)
+
+                    // Programar notificaciones inmediatamente (no esperar aprobación)
+                    unifiedMonkey.planNotificationsForEvent(existingPlan)
+                }
+            }
+
+            // Procesar TODOS los eventos con la AI Estricta
+            if (calendarEvents.isNotEmpty()) {
+                Log.d(TAG, "Enviando ${calendarEvents.size} eventos a la AI Estricta para análisis")
+                processAIPlansUseCase.processEventsWithAI(
+                    calendarEvents = calendarEvents,
+                    existingPlans = database.eventPlanDao().getEventsByDate(today)
                 )
-
-                database.eventPlanDao().insert(eventPlan)
-
-                // Crear notificaciones default
-                createDefaultNotifications(eventPlan)
-
-                // Emitir evento
-                eventBus.emit(ChapelotasEvent.NewEventDetected(
-                    eventId = eventPlan.eventId,
-                    title = eventPlan.title,
-                    startTime = eventPlan.startTime
-                ))
-            }
-
-            // Marcar eventos eliminados
-            val currentIds = calendarEvents.map { it.id }.toSet()
-            val deletedEvents = existingEvents.filter { it.calendarEventId !in currentIds }
-
-            for (event in deletedEvents) {
-                database.eventPlanDao().deleteById(event.eventId)
-                database.notificationDao().deleteByEventId(event.eventId)
-
-                eventBus.emit(ChapelotasEvent.EventDeleted(
-                    eventId = event.eventId,
-                    title = event.title
-                ))
             }
         }
     }
 
-    /**
-     * Crear notificaciones default para un evento
-     */
-    private suspend fun createDefaultNotifications(event: EventPlan) {
-        val notificationMinutes = event.getNotificationMinutesList()
-
-        val notifications = notificationMinutes.mapIndexed { index, minutes ->
-            ScheduledNotification(
-                eventId = event.eventId,
-                scheduledTime = event.startTime.minusMinutes(minutes.toLong()),
-                minutesBefore = minutes,
-                type = if (event.isCritical && minutes <= 15)
-                    NotificationType.CRITICAL_ALERT
-                else
-                    NotificationType.REMINDER,
-                priority = when {
-                    event.isCritical -> NotificationPriority.HIGH
-                    index == 0 -> NotificationPriority.NORMAL // Primera notificación
-                    else -> NotificationPriority.LOW
-                }
-            )
-        }.filter {
-            // Solo crear notificaciones futuras
-            it.scheduledTime.isAfter(LocalDateTime.now())
-        }
-
-        database.notificationDao().insertAll(notifications)
-    }
-
-    /**
-     * Análisis inicial con IA
-     */
-    private suspend fun performInitialAIAnalysis(dayPlan: DayPlan) {
-        try {
-            eventBus.emit(ChapelotasEvent.AIAnalysisStarted("daily"))
-
-            // Aquí podríamos usar la IA para:
-            // 1. Sugerir eventos críticos
-            // 2. Detectar conflictos
-            // 3. Optimizar tiempos de notificación
-
-            // Por ahora solo actualizamos el timestamp
-            database.dayPlanDao().updateLastAiAnalysis(dayPlan.date)
-
-            eventBus.emit(ChapelotasEvent.AIAnalysisCompleted(
-                type = "daily",
-                success = true,
-                itemsProcessed = todayEvents.value.size
-            ))
-
-        } catch (e: Exception) {
-            Log.e("CalendarMonitor", "Error en análisis IA", e)
-            eventBus.emit(ChapelotasEvent.AIAnalysisCompleted(
-                type = "daily",
-                success = false,
-                itemsProcessed = 0
-            ))
-        }
-    }
-
-    /**
-     * Usuario actualiza criticidad/distancia de un evento
-     */
-    fun actualizarEvento(eventoId: String, esCritico: Boolean, distancia: String) {
-        viewModelScope.launch {
-            try {
-                val eventDistance = EventDistance.fromString(distancia)
-
-                // Actualizar en Room
-                database.eventPlanDao().updateCritical(eventoId, esCritico)
-                database.eventPlanDao().updateDistance(eventoId, eventDistance)
-
-                // Actualizar notificaciones basadas en la nueva distancia
-                database.withTransaction {
-                    // Eliminar notificaciones existentes no ejecutadas
-                    val existingNotifications = database.notificationDao()
-                        .getActiveNotificationsByEvent(eventoId)
-
-                    existingNotifications.forEach {
-                        database.notificationDao().delete(it)
-                    }
-
-                    // Crear nuevas notificaciones con los tiempos actualizados
-                    val event = database.eventPlanDao().getEvent(eventoId) ?: return@withTransaction
-                    createDefaultNotifications(event.copy(
-                        isCritical = esCritico,
-                        distance = eventDistance
-                    ))
-                }
-
-                // Emitir eventos
-                eventBus.emit(ChapelotasEvent.EventMarkedCritical(
-                    eventId = eventoId,
-                    isCritical = esCritico
-                ))
-
-                eventBus.emit(ChapelotasEvent.DistanceUpdated(
-                    eventId = eventoId,
-                    distance = eventDistance,
-                    previousDistance = EventDistance.CERCA
-                ))
-
-                Log.d("CalendarMonitor", "✅ Evento actualizado: $eventoId")
-
-            } catch (e: Exception) {
-                Log.e("CalendarMonitor", "Error actualizando evento", e)
-            }
-        }
-    }
-
-    /**
-     * Observar cambios en calendario
-     */
     private fun observarCalendario() {
         viewModelScope.launch {
             calendarRepository.observeCalendarChanges().collect {
-                Log.d("CalendarMonitor", "📅 Cambio detectado en calendario")
-
-                // Re-sincronizar si estamos monitoreando
                 if (_isMonitoring.value) {
-                    currentDayPlan.value?.let { plan ->
-                        val events = calendarRepository.getTodayEvents()
-                        syncCalendarWithRoom(events, plan)
-                    }
+                    Log.d(TAG, "observarCalendario: DETECTADO CAMBIO EN CALENDARIO. Re-sincronizando...")
+                    val calendarEvents = calendarRepository.getTodayEvents()
+                    syncCalendarWithRoom(calendarEvents)
                 }
             }
         }
     }
 
-    /**
-     * Observar eventos del sistema
-     */
+    fun actualizarCriticidad(eventId: String, esCritico: Boolean) {
+        viewModelScope.launch {
+            database.eventPlanDao().getEvent(eventId)?.let {
+                // Marcar como modificado por usuario
+                val updatedPlan = it.copy(
+                    isCritical = esCritico,
+                    userModified = true // IMPORTANTE: El usuario hizo un cambio manual
+                )
+                database.eventPlanDao().update(updatedPlan)
+                unifiedMonkey.planNotificationsForEvent(updatedPlan)
+                Log.d(TAG, "Usuario cambió criticidad de '${it.title}' a $esCritico")
+            }
+        }
+    }
+    fun revivirEvento(eventId: String) {
+        viewModelScope.launch {
+            database.eventPlanDao().getEvent(eventId)?.let { event ->
+                // Cambiar el estado a PENDING
+                database.eventPlanDao().updateResolutionStatus(
+                    eventId,
+                    EventResolutionStatus.PENDING
+                )
+
+                // Registrar en el log
+                database.conversationLogDao().insert(
+                    ConversationLog(
+                        timestamp = LocalDateTime.now(),
+                        role = "user",
+                        content = "🔄 Reactivé el evento: ${event.title}",
+                        eventId = eventId
+                    )
+                )
+
+                // Respuesta de Chapelotas
+                val dayPlan = database.dayPlanDao().getTodayPlan()
+                val response = if (dayPlan?.sarcasticMode == true) {
+                    "¿Viste que no estaba tan hecho? ${event.title} está de vuelta en la lista. 🙄"
+                } else {
+                    "He reactivado ${event.title}. Las notificaciones se reanudarán según lo programado."
+                }
+
+                database.conversationLogDao().insert(
+                    ConversationLog(
+                        timestamp = LocalDateTime.now().plusSeconds(1),
+                        role = "assistant",
+                        content = response
+                    )
+                )
+
+                // Re-programar notificaciones para el evento reactivado
+                unifiedMonkey.planNotificationsForEvent(event)
+
+                Log.d(TAG, "Evento '${event.title}' reactivado")
+            }
+        }
+    }
+
+    fun actualizarDistancia(eventId: String, distancia: String) {
+        viewModelScope.launch {
+            database.eventPlanDao().getEvent(eventId)?.let {
+                // Marcar como modificado por usuario
+                val updatedPlan = it.copy(
+                    distance = EventDistance.fromString(distancia),
+                    userModified = true // IMPORTANTE: El usuario hizo un cambio manual
+                )
+                database.eventPlanDao().update(updatedPlan)
+                unifiedMonkey.planNotificationsForEvent(updatedPlan)
+                Log.d(TAG, "Usuario cambió distancia de '${it.title}' a $distancia")
+            }
+        }
+    }
+    private suspend fun refreshEventStates() {
+        try {
+            val now = LocalDateTime.now()
+            val todayEvents = database.eventPlanDao().getEventsByDate(LocalDate.now())
+
+            todayEvents.forEach { event ->
+                // Actualizar eventos pasados que siguen como PENDING
+                if (event.startTime.isBefore(now) && event.resolutionStatus == EventResolutionStatus.PENDING) {
+                    database.eventPlanDao().updateResolutionStatus(
+                        event.eventId,
+                        EventResolutionStatus.MISSED_ACKNOWLEDGED
+                    )
+                    Log.d(TAG, "Evento '${event.title}' marcado como perdido")
+                }
+            }
+
+            Log.d(TAG, "Estados de eventos actualizados")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error actualizando estados de eventos", e)
+        }
+    }
+
     private fun observeSystemEvents() {
         viewModelScope.launch {
             eventBus.events.collect { event ->
-                when (event) {
-                    is ChapelotasEvent.MonkeyCheckCompleted -> {
-                        _nextCheckTime.value = event.nextCheckTime
-                    }
-
-                    is ChapelotasEvent.ConflictDetected -> {
-                        // Los conflictos ya se muestran via Flow de Room
-                        Log.d("CalendarMonitor", "⚠️ Conflicto detectado: ${event.conflictId}")
-                    }
-
-                    is ChapelotasEvent.NotificationShown -> {
-                        Log.d("CalendarMonitor", "🔔 Notificación mostrada: ${event.eventId}")
-                    }
-
-                    else -> {
-                        // Otros eventos
-                    }
+                if (event is ChapelotasEvent.MonkeyCheckCompleted) {
+                    // La UI se actualiza desde la DB
                 }
             }
         }
-    }
-
-    override fun onCleared() {
-        super.onCleared()
-        // NO detener el mono - debe seguir corriendo en el servicio
-        Log.d("CalendarMonitor", "ViewModel limpiado pero el mono sigue activo")
     }
 }

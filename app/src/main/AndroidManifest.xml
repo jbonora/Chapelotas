@@ -2,26 +2,25 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- Permisos existentes -->
-    <uses-permission android:name="android.permission.READ_CALENDAR" />
+    <!-- Permisos básicos -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <uses-permission android:name="android.permission.VIBRATE" />
-    <uses-permission android:name="android.permission.WAKE_LOCK" />
-    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
-    <uses-permission android:name="android.permission.INTERNET" />
-
-    <!-- Permisos para persistencia nivel WhatsApp -->
+    <uses-permission android:name="android.permission.READ_CALENDAR" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+
+    <!-- Permisos adicionales para mejor funcionamiento en Huawei -->
+    <uses-permission android:name="android.permission.DISABLE_KEYGUARD" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
+
+    <!-- Para Android 12+ -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
-
-    <!-- Permisos para algunos fabricantes -->
-    <uses-permission android:name="android.permission.REQUEST_COMPANION_RUN_IN_BACKGROUND" />
-    <uses-permission android:name="android.permission.REQUEST_COMPANION_USE_DATA_IN_BACKGROUND" />
 
     <application
         android:name=".ChapelotasApplication"
@@ -33,68 +32,92 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.Chapelotas"
-        android:persistent="true">
+        tools:targetApi="31">
 
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:launchMode="singleTop">
+            android:theme="@style/Theme.Chapelotas">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
 
-        <!-- Servicio principal ultra-persistente -->
+        <!-- CriticalAlertActivity con configuración mejorada para Huawei -->
+        <activity
+            android:name=".presentation.ui.CriticalAlertActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:launchMode="singleInstance"
+            android:taskAffinity=""
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:screenOrientation="portrait"
+            android:theme="@style/Theme.Chapelotas.FullScreen"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:showOnLockScreen="true"
+            android:directBootAware="true" />
+
+        <!-- Servicio principal con configuración para foreground -->
         <service
             android:name=".data.notifications.ChapelotasNotificationService"
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="dataSync"
-            android:stopWithTask="false"
-            android:process=":chapelotas_service">
-            <intent-filter android:priority="1000">
-                <action android:name="com.chapelotas.START_SERVICE" />
-            </intent-filter>
-        </service>
+            android:directBootAware="true" />
 
-        <!-- Receiver para inicio con boot -->
+        <service
+            android:name=".domain.usecases.MonkeyJobService"
+            android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
+
+        <!-- Receivers -->
         <receiver
             android:name=".data.notifications.BootReceiver"
             android:enabled="true"
             android:exported="true"
-            android:permission="android.permission.RECEIVE_BOOT_COMPLETED">
-            <intent-filter android:priority="1000">
+            android:directBootAware="true">
+            <intent-filter android:priority="999">
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
                 <action android:name="android.intent.action.QUICKBOOT_POWERON" />
                 <action android:name="com.htc.intent.action.QUICKBOOT_POWERON" />
-                <action android:name="android.intent.action.REBOOT" />
             </intent-filter>
         </receiver>
 
-        <!-- Receiver para reiniciar servicio -->
+        <receiver
+            android:name=".data.notifications.NotificationAlarmReceiver"
+            android:enabled="true"
+            android:exported="false"
+            android:directBootAware="true" />
+
+        <receiver
+            android:name=".data.notifications.NotificationActionReceiver"
+            android:enabled="true"
+            android:exported="false" />
+
         <receiver
             android:name=".data.notifications.RestartServiceReceiver"
             android:enabled="true"
-            android:exported="false">
-            <intent-filter>
-                <action android:name="com.chapelotas.RESTART_SERVICE" />
-            </intent-filter>
-        </receiver>
-
-        <!-- Receiver para acciones de notificación (ya existente) -->
-        <receiver
-            android:name=".data.notifications.NotificationActionReceiver"
             android:exported="false" />
 
-        <!-- Actividad de alerta crítica (ya existente) -->
-        <activity
-            android:name=".presentation.ui.CriticalAlertActivity"
-            android:excludeFromRecents="true"
-            android:launchMode="singleTask"
-            android:showOnLockScreen="true"
-            android:theme="@style/Theme.Chapelotas.CriticalAlert" />
+        <!-- Provider para WorkManager -->
+        <provider
+            android:name="androidx.startup.InitializationProvider"
+            android:authorities="${applicationId}.androidx-startup"
+            android:exported="false"
+            tools:node="merge">
+            <meta-data
+                android:name="androidx.work.WorkManagerInitializer"
+                android:value="androidx.startup"
+                tools:node="remove" />
+        </provider>
+
+        <!-- Meta-data para compatibilidad con Huawei -->
+        <meta-data
+            android:name="com.huawei.android.keepalive"
+            android:value="true" />
 
     </application>
 

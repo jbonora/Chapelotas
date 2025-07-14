@@ -38,10 +38,7 @@ interface PreferencesRepository {
      */
     suspend fun setSarcasticMode(enabled: Boolean)
 
-    /**
-     * Actualiza los calendarios preferidos
-     */
-    suspend fun updatePreferredCalendars(calendarIds: Set<Long>)
+    // El método "updatePreferredCalendars" ha sido eliminado.
 
     /**
      * Marca que el usuario aceptó la política de privacidad

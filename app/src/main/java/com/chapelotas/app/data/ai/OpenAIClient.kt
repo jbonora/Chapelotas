@@ -1,5 +1,6 @@
 package com.chapelotas.app.data.ai
 
+import com.google.gson.annotations.SerializedName
 import retrofit2.http.*
 
 interface OpenAIApi {
@@ -11,7 +12,7 @@ interface OpenAIApi {
 }
 
 data class ChatCompletionRequest(
-    val model: String = "gpt-3.5-turbo", // Usando 3.5 que es más barato
+    val model: String = "gpt-3.5-turbo",
     val messages: List<Message>,
     val temperature: Double = 0.7,
     val response_format: ResponseFormat? = null
@@ -44,7 +45,57 @@ data class Usage(
     val total_tokens: Int
 )
 
-// Data classes para parsear respuestas JSON de la IA
+// --- ESTRUCTURA DE RESPUESTA PARA EL NUEVO MODO BATCH ---
+
+// El objeto principal que esperamos recibir de la IA
+data class AIPlanBatchResponse(
+    val plans: List<AIEventPlan>
+)
+
+// Representa el plan para un único evento dentro del batch
+data class AIEventPlan(
+    @SerializedName("eventId")
+    val eventId: Long,
+
+    @SerializedName("isCritical")
+    val isCritical: Boolean,
+
+    @SerializedName("conflict")
+    val conflict: AIConflictInfo?,
+
+    @SerializedName("notifications")
+    val notifications: List<AINotification>
+)
+
+// Representa la información de un conflicto detectado por la IA
+data class AIConflictInfo(
+    @SerializedName("hasConflict")
+    val hasConflict: Boolean,
+
+    @SerializedName("conflictingEventId")
+    val conflictingEventId: Long?,
+
+    @SerializedName("conflictType")
+    val conflictType: String? // "OVERLAP" | "TOO_CLOSE"
+)
+
+// Representa una notificación individual dentro del plan de un evento
+data class AINotification(
+    @SerializedName("minutesBefore")
+    val minutesBefore: Int,
+
+    @SerializedName("message")
+    val message: String,
+
+    @SerializedName("priority")
+    val priority: String, // "LOW", "NORMAL", "HIGH", "CRITICAL"
+
+    @SerializedName("type")
+    val type: String // "EVENT_REMINDER", "PREPARATION_TIP"
+)
+
+
+// --- ESTRUCTURAS ANTIGUAS (Se mantienen por ahora por si hay que revertir) ---
 data class AIPlanResponse(
     val insights: String,
     val suggestedFocus: String,

@@ -19,7 +19,7 @@ import javax.inject.Inject
 
 /**
  * Servicio ultra-persistente estilo WhatsApp
- * ACTUALIZADO para usar UnifiedMonkeyService con Room
+ * ACTUALIZADO para trabajar con la arquitectura de AlarmManager
  */
 @AndroidEntryPoint
 class ChapelotasNotificationService : Service() {
@@ -36,18 +36,15 @@ class ChapelotasNotificationService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        Log.d("ChapelotasService", "🚀 Servicio creado - Room Edition")
+        Log.d("ChapelotasService", "🚀 Servicio creado - Edición Bello Durmiente")
 
-        // Adquirir WakeLock parcial para mantener CPU activa
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
         wakeLock = powerManager.newWakeLock(
             PowerManager.PARTIAL_WAKE_LOCK,
             "Chapelotas::MonkeyWakeLock"
         ).apply {
-            acquire(10*60*1000L) // 10 minutos, se renueva automáticamente
+            acquire(10*60*1000L)
         }
-
-        // Emitir evento de servicio iniciado
         eventBus.tryEmit(ChapelotasEvent.ServiceStarted("ChapelotasNotificationService"))
     }
 
@@ -57,11 +54,14 @@ class ChapelotasNotificationService : Service() {
         if (!isServiceStarted) {
             isServiceStarted = true
             startForegroundService()
-            startMonkey()
-            scheduleRestartAlarm() // Por si Android lo mata
+            // --- CAMBIO CLAVE: Ya no llamamos a startMonkey() ---
+            // En su lugar, nos aseguramos de que la próxima alarma esté programada.
+            // Esto es crucial por si el servicio se reinicia y no hay alarmas pendientes.
+            serviceScope.launch {
+                unifiedMonkey.scheduleNextAlarm()
+            }
+            scheduleRestartAlarm()
         }
-
-        // START_STICKY para máxima persistencia
         return START_STICKY
     }
 
@@ -69,72 +69,55 @@ class ChapelotasNotificationService : Service() {
 
     override fun onDestroy() {
         Log.w("ChapelotasService", "⚠️ Servicio destruido - Programando reinicio...")
-
-        // Emitir evento
         eventBus.tryEmit(ChapelotasEvent.ServiceStopped(
             serviceName = "ChapelotasNotificationService",
             reason = "Android killed service"
         ))
-
-        // Liberar recursos
         wakeLock?.release()
         serviceScope.cancel()
         isServiceStarted = false
+        scheduleRestartAlarm(delayMillis = 1000)
 
-        // Programar reinicio inmediato
-        scheduleRestartAlarm(delayMillis = 1000) // 1 segundo
-
-        // Enviar broadcast para reiniciar
-        sendBroadcast(Intent("com.chapelotas.RESTART_SERVICE"))
+        // --- CAMBIO CLAVE: Hacemos el intent explícito ---
+        val restartIntent = Intent(this, RestartServiceReceiver::class.java)
+        sendBroadcast(restartIntent)
 
         super.onDestroy()
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
         Log.w("ChapelotasService", "📱 App removida de recientes - Manteniéndome vivo...")
-
-        // Reiniciar el servicio cuando quitan la app de recientes
-        val restartServiceIntent = Intent(applicationContext, ChapelotasNotificationService::class.java)
-        restartServiceIntent.setPackage(packageName)
-
+        val restartServiceIntent = Intent(applicationContext, ChapelotasNotificationService::class.java).apply {
+            setPackage(packageName)
+        }
         val restartServicePendingIntent = PendingIntent.getService(
-            applicationContext,
-            1,
-            restartServiceIntent,
+            applicationContext, 1, restartServiceIntent,
             PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_IMMUTABLE
         )
-
         val alarmService = applicationContext.getSystemService(Context.ALARM_SERVICE) as AlarmManager
         alarmService.set(
             AlarmManager.ELAPSED_REALTIME,
             android.os.SystemClock.elapsedRealtime() + 1000,
             restartServicePendingIntent
         )
-
         super.onTaskRemoved(rootIntent)
     }
 
-    /**
-     * Crear notificación invisible en canal de importancia NONE
-     */
     private fun startForegroundService() {
         createInvisibleChannel()
-
         val notification = NotificationCompat.Builder(this, INVISIBLE_CHANNEL_ID)
-            .setContentTitle("") // Sin título
-            .setContentText("") // Sin texto
+            .setContentTitle("")
+            .setContentText("")
             .setSmallIcon(R.drawable.ic_notification)
             .setPriority(NotificationCompat.PRIORITY_MIN)
             .setVisibility(NotificationCompat.VISIBILITY_SECRET)
             .setOngoing(true)
             .build()
-
         startForeground(FOREGROUND_SERVICE_ID, notification)
 
-        // Renovar WakeLock periódicamente
         serviceScope.launch {
             while (isActive) {
-                delay(5 * 60 * 1000) // Cada 5 minutos
+                delay(5 * 60 * 1000)
                 wakeLock?.let {
                     if (it.isHeld) it.release()
                     it.acquire(10*60*1000L)
@@ -143,61 +126,23 @@ class ChapelotasNotificationService : Service() {
         }
     }
 
-    /**
-     * Crear canal invisible
-     */
     private fun createInvisibleChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 INVISIBLE_CHANNEL_ID,
                 "Servicio Chapelotas",
-                NotificationManager.IMPORTANCE_NONE // Invisible
+                NotificationManager.IMPORTANCE_NONE
             ).apply {
                 description = "Mantiene Chapelotas activo"
                 setShowBadge(false)
                 lockscreenVisibility = Notification.VISIBILITY_SECRET
             }
-
             val notificationManager = getSystemService(NotificationManager::class.java)
             notificationManager.createNotificationChannel(channel)
         }
     }
 
-    /**
-     * Iniciar el mono unificado con Room
-     */
-    private fun startMonkey() {
-        serviceScope.launch {
-            try {
-                // Esperar un poco para que todo se inicialice
-                delay(3000)
-
-                Log.d("ChapelotasService", "🐵 Iniciando Mono Unificado con Room...")
-                unifiedMonkey.startMonkey()
-
-                Log.d("ChapelotasService", "✅ Mono iniciado exitosamente")
-
-            } catch (e: Exception) {
-                Log.e("ChapelotasService", "❌ Error iniciando mono", e)
-
-                // Emitir evento de error
-                eventBus.tryEmit(ChapelotasEvent.MonkeyError(
-                    error = e.message ?: "Unknown error",
-                    willRetry = true,
-                    retryInSeconds = 30
-                ))
-
-                // Reintentar en 30 segundos
-                delay(30_000)
-                startMonkey()
-            }
-        }
-    }
-
-    /**
-     * Programar alarma para reiniciar el servicio si Android lo mata
-     */
-    private fun scheduleRestartAlarm(delayMillis: Long = 60000) { // 1 minuto por defecto
+    private fun scheduleRestartAlarm(delayMillis: Long = 60000) {
         val intent = Intent(this, RestartServiceReceiver::class.java)
         val pendingIntent = PendingIntent.getBroadcast(
             this,
@@ -205,10 +150,7 @@ class ChapelotasNotificationService : Service() {
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-
         val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
-
-        // Usar alarma exacta para mayor confiabilidad
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             alarmManager.setExactAndAllowWhileIdle(
                 AlarmManager.RTC_WAKEUP,
@@ -231,14 +173,9 @@ class ChapelotasNotificationService : Service() {
     }
 }
 
-/**
- * Receiver para reiniciar el servicio
- * DEBE ESTAR EN EL MISMO ARCHIVO
- */
 class RestartServiceReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context?, intent: Intent?) {
         Log.d("RestartReceiver", "🔄 Reiniciando servicio...")
-
         context?.let { ctx ->
             val serviceIntent = Intent(ctx, ChapelotasNotificationService::class.java)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

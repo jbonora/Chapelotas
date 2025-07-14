@@ -1,339 +1,277 @@
 package com.chapelotas.app.domain.usecases
 
+import android.app.AlarmManager
+import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
+import android.os.Build
+import java.time.Duration
 import android.util.Log
 import com.chapelotas.app.data.database.ChapelotasDatabase
-import com.chapelotas.app.data.database.entities.*
+import com.chapelotas.app.data.database.entities.EventPlan
+import com.chapelotas.app.data.notifications.NotificationAlarmReceiver
 import com.chapelotas.app.domain.events.ChapelotasEvent
 import com.chapelotas.app.domain.events.ChapelotasEventBus
-import com.chapelotas.app.domain.repositories.AIRepository
-import com.chapelotas.app.domain.repositories.NotificationRepository
+import com.chapelotas.app.presentation.ui.CriticalAlertActivity
 import dagger.hilt.android.qualifiers.ApplicationContext
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.LocalDateTime
-import java.time.LocalTime
-import java.time.format.DateTimeFormatter
+import java.time.ZoneId
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * El Mono 2.0 - Ahora con Room y más inteligente
- * No más JSON, todo en base de datos
+ * UnifiedMonkeyService - Ahora usando MonkeyAgenda
+ * Mucho más simple y sin loops
  */
 @Singleton
 class UnifiedMonkeyService @Inject constructor(
     @ApplicationContext private val context: Context,
     private val database: ChapelotasDatabase,
     private val eventBus: ChapelotasEventBus,
-    private val notificationRepository: NotificationRepository,
-    private val masterPlanController: MasterPlanController,
-    private val aiRepository: AIRepository,
-    private val scope: CoroutineScope
+    private val monkeyAgendaService: MonkeyAgendaService
 ) {
+    private val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+    private val scope = CoroutineScope(SupervisorJob())
+
     companion object {
-        private const val TAG = "MonkeyService"
-        private const val CHECK_INTERVAL_MS = 5 * 60 * 1000L // 5 minutos
-        private const val MIN_CHECK_INTERVAL_MS = 2 * 60 * 1000L // 2 minutos cuando hay eventos próximos
+        private const val TAG = "UnifiedMonkey"
+        private const val ALARM_REQUEST_CODE = 1337
+        private const val CRITICAL_ALARM_BASE_CODE = 2000
     }
 
-    private var checkJob: Job? = null
-    private var checkCounter = 0L
-
     /**
-     * Iniciar el mono - ahora más simple y robusto
+     * Planifica notificaciones para un evento en la MonkeyAgenda
      */
-    fun startMonkey() {
-        Log.d(TAG, "🐵 Mono 2.0 despertando con Room...")
-
-        checkJob?.cancel()
-        checkJob = scope.launch {
-            // Primero, asegurar que existe el plan de hoy
-            ensureTodayPlan()
-
-            while (isActive) {
-                try {
-                    performCheck()
-
-                    // Calcular próximo check inteligentemente
-                    val nextInterval = calculateNextCheckInterval()
-                    delay(nextInterval)
-
-                } catch (e: Exception) {
-                    Log.e(TAG, "🐵 Error en check: ${e.message}", e)
-                    eventBus.tryEmit(ChapelotasEvent.MonkeyError(
-                        error = e.message ?: "Unknown error",
-                        willRetry = true,
-                        retryInSeconds = 30
-                    ))
-                    delay(30_000) // Retry en 30 segundos
-                }
-            }
+    suspend fun planNotificationsForEvent(event: EventPlan) {
+        // No programar para eventos completados
+        if (event.resolutionStatus.name == "COMPLETED") {
+            Log.d(TAG, "Evento '${event.title}' está completado. No se programarán notificaciones.")
+            return
         }
-    }
 
-    /**
-     * Detener el mono (aunque no debería detenerse nunca)
-     */
-    fun stopMonkey() {
-        Log.w(TAG, "🐵 Alguien intenta detener al mono... ignorando")
-        // El mono es eterno
-    }
-
-    /**
-     * Check principal del mono
-     */
-    private suspend fun performCheck() {
-        checkCounter++
-        val startTime = System.currentTimeMillis()
-
-        Log.d(TAG, "🐵 Check #$checkCounter iniciando...")
-        eventBus.emit(ChapelotasEvent.MonkeyCheckStarted(checkCounter))
+        // Cancelar notificaciones anteriores del evento
+        database.monkeyAgendaDao().cancelPendingForEvent(event.eventId)
 
         val now = LocalDateTime.now()
-        var notificationsShown = 0
 
-        // 1. Obtener notificaciones pendientes de Room
-        val pendingNotifications = database.notificationDao()
-            .getPendingNotifications(now)
+        if (event.isCritical) {
+            // Eventos críticos: programar llamadas directas
+            scheduleCriticalEventCalls(event)
+        } else {
+            // Eventos normales: programar en MonkeyAgenda
+            val notificationTimes = event.getNotificationMinutesList()
 
-        Log.d(TAG, "🐵 Encontradas ${pendingNotifications.size} notificaciones pendientes")
+            notificationTimes.forEach { minutesBefore ->
+                val notificationTime = event.startTime.minusMinutes(minutesBefore.toLong())
 
-        // 2. Procesar cada notificación
-        for (notification in pendingNotifications) {
-            if (notification.shouldShowNow()) {
-                showNotification(notification)
-                notificationsShown++
-            }
-        }
+                if (notificationTime.isAfter(now)) {
+                    monkeyAgendaService.scheduleAction(
+                        scheduledTime = notificationTime,
+                        actionType = "NOTIFY_EVENT",
+                        eventId = event.eventId
+                    )
 
-        // 3. Checkear conflictos no notificados
-        checkUnnotifiedConflicts()
-
-        // 4. Actualizar próximo check time en el plan
-        updateNextCheckTime()
-
-        // 5. Emitir evento de completado
-        val nextCheck = database.notificationDao()
-            .getNextNotificationTime(now) ?: now.plusMinutes(5)
-
-        val duration = System.currentTimeMillis() - startTime
-        Log.d(TAG, "🐵 Check completado en ${duration}ms. Notificaciones: $notificationsShown")
-
-        eventBus.emit(ChapelotasEvent.MonkeyCheckCompleted(
-            checkNumber = checkCounter,
-            notificationsShown = notificationsShown,
-            nextCheckTime = nextCheck
-        ))
-    }
-
-    /**
-     * Mostrar una notificación
-     */
-    private suspend fun showNotification(notification: ScheduledNotification) {
-        try {
-            // Obtener el evento de la DB
-            val event = database.eventPlanDao().getEvent(notification.eventId)
-                ?: run {
-                    Log.w(TAG, "🐵 Evento ${notification.eventId} no encontrado")
-                    database.notificationDao().markAsDismissed(notification.notificationId)
-                    return
+                    Log.d(TAG, "Programada notificación para ${event.title} a las $notificationTime")
                 }
+            }
+        }
 
-            // Obtener el plan del día
-            val dayPlan = database.dayPlanDao().getPlan(event.dayDate)
-                ?: return
+        // Reprogramar alarma
+        scheduleNextAlarm()
+    }
 
-            // Generar mensaje con IA o usar el pre-generado
-            val message = notification.message ?: generateNotificationMessage(
-                event = event,
-                plan = dayPlan,
-                notification = notification
+    /**
+     * Programa llamadas críticas (siguen usando AlarmManager directo)
+     */
+    private fun scheduleCriticalEventCalls(event: EventPlan) {
+        val now = LocalDateTime.now()
+        val criticalTimes = listOf(60, 30, 15, 5) // minutos antes
+
+        criticalTimes.forEach { minutesBefore ->
+            val callTime = event.startTime.minusMinutes(minutesBefore.toLong())
+
+            if (callTime.isAfter(now)) {
+                scheduleCriticalCall(event, minutesBefore, callTime)
+            }
+        }
+    }
+
+    private fun scheduleCriticalCall(event: EventPlan, minutesBefore: Int, callTime: LocalDateTime) {
+        val alarmTimeMillis = callTime
+            .atZone(ZoneId.systemDefault())
+            .toInstant()
+            .toEpochMilli()
+
+        Log.d(TAG, "🚨 Programando llamada crítica para '${event.title}' - $minutesBefore min antes")
+
+        val callIntent = Intent(context, CriticalAlertActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_NO_USER_ACTION or
+                    Intent.FLAG_FROM_BACKGROUND
+
+            val message = when (minutesBefore) {
+                60 -> "⏰ ALERTA CRÍTICA\n\n${event.title}\nen 1 HORA"
+                30 -> "🚨 ATENCIÓN URGENTE\n\n${event.title}\nen 30 MINUTOS"
+                15 -> "⚠️ MUY IMPORTANTE\n\n${event.title}\nen 15 MINUTOS"
+                5 -> "🔴 URGENTE AHORA\n\n${event.title}\nen 5 MINUTOS"
+                else -> "🚨 EVENTO CRÍTICO\n\n${event.title}"
+            }
+
+            putExtra("message", message)
+            putExtra("event_id", event.eventId)
+            putExtra("notification_id", "${event.eventId}_critical_$minutesBefore")
+
+            event.location?.let {
+                putExtra("location", "📍 $it")
+            }
+        }
+
+        val requestCode = CRITICAL_ALARM_BASE_CODE + "${event.eventId}_$minutesBefore".hashCode()
+        val callPending = PendingIntent.getActivity(
+            context,
+            requestCode,
+            callIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            val alarmClockInfo = AlarmManager.AlarmClockInfo(
+                alarmTimeMillis,
+                callPending
             )
+            alarmManager.setAlarmClock(alarmClockInfo, callPending)
+            Log.d(TAG, "✅ Llamada crítica programada con setAlarmClock")
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            alarmManager.setExactAndAllowWhileIdle(
+                AlarmManager.RTC_WAKEUP,
+                alarmTimeMillis,
+                callPending
+            )
+        }
+    }
 
-            // Convertir a notificación del dominio
-            val domainNotification = com.chapelotas.app.domain.entities.ChapelotasNotification(
-                id = notification.notificationId.toString(),
-                eventId = event.calendarEventId,
-                scheduledTime = notification.scheduledTime,
-                message = message,
-                priority = when(notification.priority) {
-                    NotificationPriority.LOW -> com.chapelotas.app.domain.entities.NotificationPriority.LOW
-                    NotificationPriority.NORMAL -> com.chapelotas.app.domain.entities.NotificationPriority.NORMAL
-                    NotificationPriority.HIGH -> com.chapelotas.app.domain.entities.NotificationPriority.HIGH
-                    NotificationPriority.CRITICAL -> com.chapelotas.app.domain.entities.NotificationPriority.CRITICAL
-                },
-                type = when(notification.type) {
-                    NotificationType.REMINDER -> com.chapelotas.app.domain.entities.NotificationType.EVENT_REMINDER
-                    NotificationType.CRITICAL_ALERT -> com.chapelotas.app.domain.entities.NotificationType.CRITICAL_ALERT
-                    NotificationType.PREPARATION_TIP -> com.chapelotas.app.domain.entities.NotificationType.PREPARATION_TIP
-                    else -> com.chapelotas.app.domain.entities.NotificationType.EVENT_REMINDER
+    /**
+     * Procesa notificaciones y reprograma
+     * AHORA USA MonkeyAgenda
+     */
+    fun processNotificationsAndReschedule() {
+        scope.launch {
+            Log.d(TAG, "🟢 Procesando acciones de MonkeyAgenda")
+
+            // Delegar al MonkeyAgendaService
+            monkeyAgendaService.processNextAction()
+
+            // Reprogramar siguiente alarma
+            scheduleNextAlarm()
+        }
+    }
+
+    /**
+     * Programa la siguiente alarma basada en MonkeyAgenda
+     * SIEMPRE programa algo en máximo 1 hora
+     */
+    suspend fun scheduleNextAlarm() {
+        // Obtener próxima acción pendiente
+        val nextTime = monkeyAgendaService.getNextPendingTime()
+
+        val now = LocalDateTime.now()
+        val oneHourFromNow = now.plusHours(1)
+
+        if (nextTime != null) {
+            // Si la próxima acción es en más de 1 hora, programar un chequeo intermedio
+            if (nextTime.isAfter(oneHourFromNow)) {
+                Log.d(TAG, "Próxima acción en ${Duration.between(now, nextTime).toMinutes()} minutos. Programando chequeo intermedio.")
+
+                // Verificar si debemos programar IDLE_CHECK
+                val dayPlan = database.dayPlanDao().getTodayPlan()
+                if (dayPlan?.sarcasticMode == true && dayPlan.is24hMode) {
+                    // Programar chequeo de inactividad en 1 hora
+                    monkeyAgendaService.scheduleAction(
+                        scheduledTime = oneHourFromNow,
+                        actionType = "IDLE_CHECK"
+                    )
+                    setExactAlarm(oneHourFromNow)
+                } else {
+                    // Solo programar la alarma sin crear acción
+                    setExactAlarm(oneHourFromNow)
                 }
-            )
-
-            // Mostrar la notificación
-            notificationRepository.showImmediateNotification(domainNotification)
-
-            // Marcar como ejecutada
-            database.notificationDao().markAsExecuted(notification.notificationId)
-
-            // Log para analytics
-            val logId = database.notificationLogDao().logNotificationShown(
-                notification = notification,
-                event = event,
-                message = message,
-                deviceLocked = false, // TODO: Detectar estado del dispositivo
-                appInForeground = false // TODO: Detectar si app está en foreground
-            )
-
-            // Emitir evento
-            eventBus.emit(ChapelotasEvent.NotificationShown(
-                notificationId = notification.notificationId,
-                eventId = event.eventId,
-                message = message
-            ))
-
-            Log.d(TAG, "🐵 Notificación mostrada: ${event.title}")
-
-        } catch (e: Exception) {
-            Log.e(TAG, "🐵 Error mostrando notificación", e)
-        }
-    }
-
-    /**
-     * Generar mensaje con IA
-     */
-    private suspend fun generateNotificationMessage(
-        event: EventPlan,
-        plan: DayPlan,
-        notification: ScheduledNotification
-    ): String {
-        return try {
-            // Preparar contexto para la IA
-            val timeNow = LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm"))
-            val eventTime = event.startTime.format(DateTimeFormatter.ofPattern("HH:mm"))
-
-            // Obtener eventos críticos pendientes
-            val criticalEvents = database.eventPlanDao()
-                .getTodayCriticalEvents()
-                .filter { it.startTime.isAfter(LocalDateTime.now()) }
-
-            // Crear estructura similar al JSON para la IA
-            val eventInfo = buildString {
-                append("Evento: ${event.title}\n")
-                append("Hora: $eventTime\n")
-                event.location?.let { append("Lugar: $it\n") }
-                append("Distancia: ${event.distance.displayName}\n")
-                if (event.isCritical) append("ES CRÍTICO\n")
-            }
-
-            val criticalInfo = if (criticalEvents.isNotEmpty()) {
-                "Eventos críticos pendientes: ${criticalEvents.joinToString { it.title }}"
-            } else ""
-
-            // Llamar a la IA (reutilizando el método existente)
-            aiRepository.callOpenAIForText(
-                prompt = """
-                    Sos Chapelotas, secretaria ejecutiva de ${plan.userName.ifEmpty { "este usuario" }}.
-                    ${if (plan.sarcasticMode) "Modo: sarcástico argentino" else "Modo: profesional"}
-                    Hora actual: $timeNow
-                    
-                    EVENTO A NOTIFICAR:
-                    $eventInfo
-                    
-                    $criticalInfo
-                    
-                    Genera un mensaje corto (máximo 2 líneas) recordando este evento.
-                    ${if (plan.sarcasticMode) "Usá humor argentino pero siempre claro con la info" else "Sé profesional y cordial"}
-                """.trimIndent(),
-                temperature = 0.8
-            )
-        } catch (e: Exception) {
-            // Fallback message
-            val minutesUntil = event.minutesUntilStart()
-            when {
-                event.isCritical -> "🚨 CRÍTICO: ${event.title} en $minutesUntil minutos!"
-                minutesUntil <= 15 -> "⏰ ${event.title} empieza en $minutesUntil minutos"
-                else -> "Recordatorio: ${event.title} a las ${event.startTime.format(DateTimeFormatter.ofPattern("HH:mm"))}"
-            }
-        }
-    }
-
-    /**
-     * Checkear conflictos no notificados
-     */
-    private suspend fun checkUnnotifiedConflicts() {
-        val unnotifiedConflicts = database.conflictDao().getUnnotifiedConflicts()
-
-        for (conflict in unnotifiedConflicts) {
-            // Crear notificación especial para conflicto
-            val message = conflict.getUserMessage()
-
-            val notification = com.chapelotas.app.domain.entities.ChapelotasNotification(
-                id = "conflict_${conflict.conflictId}",
-                eventId = 0, // No es de un evento específico
-                scheduledTime = LocalDateTime.now(),
-                message = message,
-                priority = when (conflict.severity) {
-                    ConflictSeverity.HIGH -> com.chapelotas.app.domain.entities.NotificationPriority.CRITICAL
-                    ConflictSeverity.MEDIUM -> com.chapelotas.app.domain.entities.NotificationPriority.HIGH
-                    ConflictSeverity.LOW -> com.chapelotas.app.domain.entities.NotificationPriority.NORMAL
-                },
-                type = com.chapelotas.app.domain.entities.NotificationType.EVENT_REMINDER
-            )
-
-            notificationRepository.showImmediateNotification(notification)
-            database.conflictDao().markAsNotified(conflict.conflictId)
-
-            eventBus.emit(ChapelotasEvent.ConflictDetected(
-                conflictId = conflict.conflictId,
-                event1Id = conflict.event1Id,
-                event2Id = conflict.event2Id,
-                type = conflict.type,
-                severity = conflict.severity
-            ))
-        }
-    }
-
-    /**
-     * Calcular próximo intervalo de check inteligentemente
-     */
-    private suspend fun calculateNextCheckInterval(): Long {
-        val nextNotification = database.notificationDao()
-            .getNextNotificationTime()
-
-        return if (nextNotification != null) {
-            val minutesUntil = java.time.Duration
-                .between(LocalDateTime.now(), nextNotification)
-                .toMinutes()
-
-            when {
-                minutesUntil <= 10 -> MIN_CHECK_INTERVAL_MS // 2 min
-                minutesUntil <= 30 -> 3 * 60 * 1000L // 3 min
-                else -> CHECK_INTERVAL_MS // 5 min
+            } else {
+                // La próxima acción es dentro de la próxima hora
+                setExactAlarm(nextTime)
             }
         } else {
-            CHECK_INTERVAL_MS // Default 5 min
+            // No hay nada pendiente, programar chequeo en 1 hora
+            Log.d(TAG, "No hay acciones pendientes. Programando chequeo en 1 hora.")
+
+            val dayPlan = database.dayPlanDao().getTodayPlan()
+            if (dayPlan?.sarcasticMode == true) {
+                monkeyAgendaService.scheduleAction(
+                    scheduledTime = oneHourFromNow,
+                    actionType = "IDLE_CHECK"
+                )
+            }
+
+            setExactAlarm(oneHourFromNow)
         }
     }
 
-    /**
-     * Asegurar que existe plan para hoy
-     */
-    private suspend fun ensureTodayPlan() {
-        database.dayPlanDao().getOrCreateTodayPlan()
+    private fun setExactAlarm(triggerTime: LocalDateTime) {
+        cancelAlarm()
+
+        val now = LocalDateTime.now()
+
+        // PROTECCIÓN ANTI-LOOP
+        val minFutureTime = now.plusMinutes(1)
+        val actualTriggerTime = if (triggerTime.isBefore(minFutureTime)) {
+            Log.w(TAG, "⚠️ Ajustando alarma de $triggerTime a $minFutureTime para evitar loop")
+            minFutureTime
+        } else {
+            triggerTime
+        }
+
+        val triggerAtMillis = actualTriggerTime.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+
+        Log.d(TAG, "⏰ Próxima alarma programada para: $actualTriggerTime")
+
+        val intent = Intent(context, NotificationAlarmReceiver::class.java)
+        val pendingIntent = PendingIntent.getBroadcast(
+            context,
+            ALARM_REQUEST_CODE,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAtMillis, pendingIntent)
+            } else {
+                alarmManager.setExact(AlarmManager.RTC_WAKEUP, triggerAtMillis, pendingIntent)
+            }
+
+            scope.launch {
+                database.dayPlanDao().updateNextAlarmTime(LocalDate.now(), actualTriggerTime)
+                eventBus.emit(ChapelotasEvent.MonkeyCheckCompleted(0, 0, actualTriggerTime))
+            }
+
+        } catch (e: SecurityException) {
+            Log.e(TAG, "Error programando alarma. ¿Falta permiso SCHEDULE_EXACT_ALARM?", e)
+        }
     }
 
-    /**
-     * Actualizar próximo check time
-     */
-    private suspend fun updateNextCheckTime() {
-        val nextTime = LocalTime.now().plusMinutes(5)
-            .format(DateTimeFormatter.ofPattern("HH:mm"))
-
-        database.dayPlanDao().updateNextCheckTime(
-            LocalDate.now(),
-            nextTime
+    private fun cancelAlarm() {
+        val intent = Intent(context, NotificationAlarmReceiver::class.java)
+        val pendingIntent = PendingIntent.getBroadcast(
+            context,
+            ALARM_REQUEST_CODE,
+            intent,
+            PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
         )
+        if (pendingIntent != null) {
+            alarmManager.cancel(pendingIntent)
+        }
     }
 }

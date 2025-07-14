@@ -27,11 +27,12 @@ class ScheduleNotificationsUseCase @Inject constructor(
             // 1. Obtener preferencias
             val preferences = preferencesRepository.getUserPreferences()
 
+            // --- CORRECCIÓN AQUÍ: Se elimina el filtrado por IDs de calendario ---
             // 2. Obtener eventos
             val events = if (forTomorrow) {
-                calendarRepository.getTomorrowEvents(preferences.preferredCalendars.takeIf { it.isNotEmpty() })
+                calendarRepository.getTomorrowEvents()
             } else {
-                calendarRepository.getTodayEvents(preferences.preferredCalendars.takeIf { it.isNotEmpty() })
+                calendarRepository.getTodayEvents()
             }
 
             if (events.isEmpty()) {

@@ -1,105 +1,114 @@
 package com.chapelotas.app.data.database.converters
 
+import android.util.Log
 import androidx.room.TypeConverter
 import com.chapelotas.app.data.database.entities.*
 import java.time.LocalDate
 import java.time.LocalDateTime
+import java.time.LocalTime
 import java.time.format.DateTimeFormatter
+import java.time.format.DateTimeParseException
 
-/**
- * Converters para que Room pueda guardar tipos custom
- */
 class Converters {
 
-    // LocalDateTime
+    private val dateTimeFormatter = DateTimeFormatter.ISO_LOCAL_DATE_TIME
+    private val dateFormatter = DateTimeFormatter.ISO_LOCAL_DATE
+    private val timeFormatter = DateTimeFormatter.ISO_LOCAL_TIME // Para LocalTime
+
     @TypeConverter
     fun fromLocalDateTime(dateTime: LocalDateTime?): String? {
-        return dateTime?.format(DateTimeFormatter.ISO_LOCAL_DATE_TIME)
+        return dateTime?.format(dateTimeFormatter)
     }
 
     @TypeConverter
     fun toLocalDateTime(dateTimeString: String?): LocalDateTime? {
         return dateTimeString?.let {
-            LocalDateTime.parse(it, DateTimeFormatter.ISO_LOCAL_DATE_TIME)
+            try { LocalDateTime.parse(it, dateTimeFormatter) }
+            catch (e: DateTimeParseException) { null }
         }
     }
 
-    // LocalDate
     @TypeConverter
     fun fromLocalDate(date: LocalDate?): String? {
-        return date?.format(DateTimeFormatter.ISO_LOCAL_DATE)
+        return date?.format(dateFormatter)
     }
 
     @TypeConverter
     fun toLocalDate(dateString: String?): LocalDate? {
         return dateString?.let {
-            LocalDate.parse(it, DateTimeFormatter.ISO_LOCAL_DATE)
+            try { LocalDate.parse(it, dateFormatter) }
+            catch (e: DateTimeParseException) { null }
         }
     }
 
-    // EventDistance
+    // --- NUEVO CONVERSOR PARA LOCALTIME ---
     @TypeConverter
-    fun fromEventDistance(distance: EventDistance): String {
-        return distance.name
+    fun fromLocalTime(time: LocalTime?): String? {
+        return time?.format(timeFormatter)
     }
 
     @TypeConverter
-    fun toEventDistance(distanceString: String): EventDistance {
-        return EventDistance.valueOf(distanceString)
+    fun toLocalTime(timeString: String?): LocalTime? {
+        return timeString?.let {
+            try { LocalTime.parse(it, timeFormatter) }
+            catch (e: DateTimeParseException) { null }
+        }
     }
 
-    // NotificationType
+    // (El resto de los conversores de Enums sigue igual)
     @TypeConverter
-    fun fromNotificationType(type: NotificationType): String {
-        return type.name
-    }
+    fun fromUserAction(action: UserAction?): String? = action?.name
 
     @TypeConverter
-    fun toNotificationType(typeString: String): NotificationType {
-        return NotificationType.valueOf(typeString)
-    }
-
-    // NotificationPriority
-    @TypeConverter
-    fun fromNotificationPriority(priority: NotificationPriority): String {
-        return priority.name
+    fun toUserAction(name: String?): UserAction? = name?.let {
+        try { UserAction.valueOf(it) } catch (e: IllegalArgumentException) { null }
     }
 
     @TypeConverter
-    fun toNotificationPriority(priorityString: String): NotificationPriority {
-        return NotificationPriority.valueOf(priorityString)
-    }
-
-    // ConflictType
-    @TypeConverter
-    fun fromConflictType(type: ConflictType): String {
-        return type.name
-    }
+    fun fromEventResolutionStatus(status: EventResolutionStatus?): String? = status?.name
 
     @TypeConverter
-    fun toConflictType(typeString: String): ConflictType {
-        return ConflictType.valueOf(typeString)
-    }
-
-    // ConflictSeverity
-    @TypeConverter
-    fun fromConflictSeverity(severity: ConflictSeverity): String {
-        return severity.name
-    }
+    fun toEventResolutionStatus(name: String?): EventResolutionStatus = name?.let {
+        try { EventResolutionStatus.valueOf(it) } catch (e: IllegalArgumentException) { EventResolutionStatus.PENDING }
+    } ?: EventResolutionStatus.PENDING
 
     @TypeConverter
-    fun toConflictSeverity(severityString: String): ConflictSeverity {
-        return ConflictSeverity.valueOf(severityString)
-    }
-
-    // UserAction
-    @TypeConverter
-    fun fromUserAction(action: UserAction?): String? {
-        return action?.name
-    }
+    fun fromConflictSeverity(severity: ConflictSeverity?): String? = severity?.name
 
     @TypeConverter
-    fun toUserAction(actionString: String?): UserAction? {
-        return actionString?.let { UserAction.valueOf(it) }
-    }
+    fun toConflictSeverity(name: String?): ConflictSeverity = name?.let {
+        try { ConflictSeverity.valueOf(it) } catch (e: IllegalArgumentException) { ConflictSeverity.LOW }
+    } ?: ConflictSeverity.LOW
+
+    @TypeConverter
+    fun fromEventDistance(distance: EventDistance?): String? = distance?.name
+
+    @TypeConverter
+    fun toEventDistance(name: String?): EventDistance = name?.let {
+        EventDistance.entries.find { e -> e.name.equals(it, ignoreCase = true) } ?: EventDistance.CERCA
+    } ?: EventDistance.CERCA
+
+    @TypeConverter
+    fun fromNotificationType(type: NotificationType?): String? = type?.name
+
+    @TypeConverter
+    fun toNotificationType(name: String?): NotificationType = name?.let {
+        try { NotificationType.valueOf(it) } catch (e: IllegalArgumentException) { NotificationType.EVENT_REMINDER }
+    } ?: NotificationType.EVENT_REMINDER
+
+    @TypeConverter
+    fun fromConflictType(type: ConflictType?): String? = type?.name
+
+    @TypeConverter
+    fun toConflictType(name: String?): ConflictType = name?.let {
+        try { ConflictType.valueOf(it) } catch (e: IllegalArgumentException) { ConflictType.TOO_CLOSE }
+    } ?: ConflictType.TOO_CLOSE
+
+    @TypeConverter
+    fun fromNotificationPriority(priority: NotificationPriority?): String? = priority?.name
+
+    @TypeConverter
+    fun toNotificationPriority(name: String?): NotificationPriority = name?.let {
+        try { NotificationPriority.valueOf(it) } catch (e: IllegalArgumentException) { NotificationPriority.NORMAL }
+    } ?: NotificationPriority.NORMAL
 }

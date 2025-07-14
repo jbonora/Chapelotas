@@ -16,42 +16,45 @@ data class CalendarEvent(
     val isAllDay: Boolean = false,
     val calendarId: Long,
     val calendarName: String,
-    // Campos específicos de Chapelotas
-    val isCritical: Boolean = false,  // Marcado para alerta crítica (llamada simulada)
-    val hasBeenSummarized: Boolean = false  // Ya fue incluido en un resumen
+    val isCritical: Boolean = false,
+    val hasBeenSummarized: Boolean = false
 ) {
-    /**
-     * Duración del evento en minutos
-     */
+    companion object {
+        // --- CAMBIO CLAVE: Método para crear un evento vacío para el chequeo proactivo ---
+        fun createEmpty(): CalendarEvent {
+            return CalendarEvent(
+                id = 0,
+                title = "Chequeo proactivo",
+                description = null,
+                startTime = LocalDateTime.now(),
+                endTime = LocalDateTime.now(),
+                location = null,
+                isAllDay = true,
+                calendarId = 0,
+                calendarName = "",
+                isCritical = false,
+                hasBeenSummarized = true
+            )
+        }
+    }
+
     val durationInMinutes: Long
         get() = java.time.Duration.between(startTime, endTime).toMinutes()
 
-    /**
-     * Verifica si el evento es hoy
-     */
     fun isToday(): Boolean {
         val today = LocalDateTime.now().toLocalDate()
         return startTime.toLocalDate() == today
     }
 
-    /**
-     * Verifica si el evento es mañana
-     */
     fun isTomorrow(): Boolean {
         val tomorrow = LocalDateTime.now().toLocalDate().plusDays(1)
         return startTime.toLocalDate() == tomorrow
     }
 
-    /**
-     * Tiempo hasta el evento (puede ser negativo si ya pasó)
-     */
     fun minutesUntilStart(): Long {
         return java.time.Duration.between(LocalDateTime.now(), startTime).toMinutes()
     }
 
-    /**
-     * Descripción amigable del tiempo hasta el evento
-     */
     fun timeUntilStartDescription(): String {
         val minutes = minutesUntilStart()
         return when {

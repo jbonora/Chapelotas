@@ -50,6 +50,15 @@ sealed class ChapelotasEvent {
         val title: String,
         val startTime: LocalDateTime
     ) : ChapelotasEvent()
+    data class CalendarSyncCompleted(
+        val newEvents: Int,
+        val updatedEvents: Int,
+        val deletedEvents: Int
+    ) : ChapelotasEvent()
+    data class EventResolved(
+        val eventId: String,
+        val resolution: com.chapelotas.app.data.database.entities.EventResolutionStatus
+    ) : ChapelotasEvent()
 
     data class EventUpdated(
         val eventId: String,
@@ -202,6 +211,10 @@ sealed class ChapelotasEvent {
         val summary: String,
         val eventsCount: Int,
         val firstEventTime: LocalDateTime?
+    ) : ChapelotasEvent()
+    // ===== EVENTOS DE NAVEGACIÓN =====
+    data class NavigateToPlan(
+        val eventId: String? = null
     ) : ChapelotasEvent()
 }
 

@@ -1,4 +1,4 @@
-package com.chapelotas.app.ui.theme
+    package com.chapelotas.app.ui.theme
 
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.lightColorScheme

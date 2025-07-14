@@ -11,6 +11,12 @@ import java.time.LocalDate
 interface CalendarRepository {
 
     /**
+     * Verifica si la app tiene permiso para leer el calendario.
+     * @return true si el permiso está concedido, false en caso contrario.
+     */
+    fun hasCalendarReadPermission(): Boolean
+
+    /**
      * Obtiene todos los calendarios disponibles en el dispositivo
      * @return Map de ID a nombre del calendario
      */
@@ -19,37 +25,31 @@ interface CalendarRepository {
     /**
      * Obtiene todos los eventos de una fecha específica
      * @param date Fecha a consultar
-     * @param calendarIds IDs de los calendarios a incluir (null = todos)
      */
-    suspend fun getEventsForDate(
-        date: LocalDate,
-        calendarIds: Set<Long>? = null
-    ): List<CalendarEvent>
+    suspend fun getEventsForDate(date: LocalDate): List<CalendarEvent>
 
     /**
      * Obtiene eventos en un rango de fechas
      * @param startDate Fecha inicial (inclusive)
      * @param endDate Fecha final (inclusive)
-     * @param calendarIds IDs de los calendarios a incluir (null = todos)
      */
     suspend fun getEventsInRange(
         startDate: LocalDate,
-        endDate: LocalDate,
-        calendarIds: Set<Long>? = null
+        endDate: LocalDate
     ): List<CalendarEvent>
 
     /**
      * Obtiene los eventos de hoy
      */
-    suspend fun getTodayEvents(calendarIds: Set<Long>? = null): List<CalendarEvent> {
-        return getEventsForDate(LocalDate.now(), calendarIds)
+    suspend fun getTodayEvents(): List<CalendarEvent> {
+        return getEventsForDate(LocalDate.now())
     }
 
     /**
      * Obtiene los eventos de mañana
      */
-    suspend fun getTomorrowEvents(calendarIds: Set<Long>? = null): List<CalendarEvent> {
-        return getEventsForDate(LocalDate.now().plusDays(1), calendarIds)
+    suspend fun getTomorrowEvents(): List<CalendarEvent> {
+        return getEventsForDate(LocalDate.now().plusDays(1))
     }
 
     /**

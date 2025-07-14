@@ -16,46 +16,38 @@ class SetupInitialConfigurationUseCase @Inject constructor(
 ) {
     suspend operator fun invoke(): Result<SetupResult> {
         return try {
-            // 1. Verificar si es primera vez
+            // 1. Verificar si es la primera vez que el usuario corre la app.
             val isFirstTime = preferencesRepository.isFirstTimeUser()
             if (!isFirstTime) {
+                // Si no es la primera vez, simplemente devolvemos que no se necesita setup.
+                // La MainActivity se encargará de verificar los permisos por su cuenta.
                 return Result.success(SetupResult(
                     isFirstTimeSetup = false,
-                    availableCalendars = emptyMap(),
                     requiresPermissions = false
                 ))
             }
 
-            // 2. Obtener calendarios disponibles
-            val calendars = try {
+            // 2. Si es la primera vez, intentamos acceder al calendario.
+            // Esto no es para obtener datos, sino para ver si el sistema nos lanza un error de permisos.
+            try {
                 calendarRepository.getAvailableCalendars()
             } catch (e: SecurityException) {
-                // No tiene permisos de calendario
+                // Si falla porque no hay permisos, le informamos a la UI que los necesita.
                 return Result.success(SetupResult(
                     isFirstTimeSetup = true,
-                    availableCalendars = emptyMap(),
                     requiresPermissions = true
                 ))
             }
 
-            // 3. Iniciar servicio de notificaciones
+            // 3. Si llegamos aquí, significa que SÍ teníamos permisos desde el principio (raro, pero posible).
+            // Iniciamos el servicio de notificaciones si no está corriendo.
             if (!notificationRepository.isNotificationServiceRunning()) {
                 notificationRepository.startNotificationService()
             }
 
-            // 4. Si hay calendarios, seleccionar todos por defecto
-            if (calendars.isNotEmpty()) {
-                val preferences = preferencesRepository.getUserPreferences()
-                preferencesRepository.updateUserPreferences(
-                    preferences.copy(
-                        preferredCalendars = calendars.keys.toSet()
-                    )
-                )
-            }
-
+            // Devolvemos que el setup de primera vez se completó y no se requieren más permisos.
             Result.success(SetupResult(
                 isFirstTimeSetup = true,
-                availableCalendars = calendars,
                 requiresPermissions = false
             ))
         } catch (e: Exception) {
@@ -69,6 +61,5 @@ class SetupInitialConfigurationUseCase @Inject constructor(
  */
 data class SetupResult(
     val isFirstTimeSetup: Boolean,
-    val availableCalendars: Map<Long, String>,
     val requiresPermissions: Boolean
 )

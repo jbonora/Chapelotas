@@ -1,38 +1,28 @@
 package com.chapelotas.app.data.database.entities
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 import java.time.LocalDate
-import java.time.LocalDateTime
+import java.time.LocalTime
+import java.time.LocalDateTime // ---> AÑADE ESTE IMPORT <---
 
-/**
- * Plan maestro del día - equivalente al JSON maestro
- * Un registro por día
- */
 @Entity(tableName = "day_plans")
 data class DayPlan(
-    @PrimaryKey
-    val date: LocalDate,
+    @PrimaryKey val date: LocalDate,
+    var lastUpdated: Long = System.currentTimeMillis(),
+    var sarcasticMode: Boolean = true,
 
-    val userId: String = "",
-    val userName: String = "",
-    val sarcasticMode: Boolean = false,
-    val lastAiAnalysis: LocalDateTime = LocalDateTime.now(),
-    val isActive: Boolean = true,
-    val nextCheckTime: String = "", // HH:mm format
+    @ColumnInfo(defaultValue = "09:00")
+    var workStartTime: LocalTime = LocalTime.of(9, 0),
 
-    // Metadata
-    val createdAt: LocalDateTime = LocalDateTime.now(),
-    val updatedAt: LocalDateTime = LocalDateTime.now()
-) {
-    /**
-     * Verifica si es momento de hacer un nuevo análisis con IA
-     * (cada 4 horas o si nunca se hizo)
-     */
-    fun needsAiReanalysis(): Boolean {
-        val hoursSinceLastAnalysis = java.time.Duration
-            .between(lastAiAnalysis, LocalDateTime.now())
-            .toHours()
-        return hoursSinceLastAnalysis >= 4
-    }
-}
+    @ColumnInfo(defaultValue = "18:00")
+    var workEndTime: LocalTime = LocalTime.of(18, 0),
+
+    @ColumnInfo(defaultValue = "0")
+    var is24hMode: Boolean = true,
+
+    // --- CAMBIO CLAVE AQUÍ ---
+    // El nuevo campo para recordar la próxima alarma.
+    var nextAlarmTime: LocalDateTime? = null
+)

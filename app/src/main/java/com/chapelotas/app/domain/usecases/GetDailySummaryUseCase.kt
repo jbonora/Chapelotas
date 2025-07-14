@@ -24,10 +24,9 @@ class GetDailySummaryUseCase @Inject constructor(
             // 1. Obtener preferencias del usuario
             val preferences = preferencesRepository.getUserPreferences()
 
+            // --- CORRECCIÓN AQUÍ: Se elimina el filtrado por IDs de calendario ---
             // 2. Obtener eventos de hoy
-            val todayEvents = calendarRepository.getTodayEvents(
-                calendarIds = preferences.preferredCalendars.takeIf { it.isNotEmpty() }
-            )
+            val todayEvents = calendarRepository.getTodayEvents()
 
             // 3. Obtener eventos críticos
             val criticalEventIds = calendarRepository.getCriticalEventIds()

@@ -11,6 +11,7 @@ import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.provider.CalendarContract
+import android.util.Log
 import androidx.core.content.ContextCompat
 import com.chapelotas.app.domain.entities.CalendarEvent
 import com.chapelotas.app.domain.repositories.CalendarRepository
@@ -27,45 +28,26 @@ import java.time.ZoneId
 import javax.inject.Inject
 import javax.inject.Singleton
 
-/**
- * Implementación del repositorio de calendario usando el ContentProvider de Android
- */
 @Singleton
 class CalendarRepositoryImpl @Inject constructor(
-    @ApplicationContext private val context: Context,
-    private val preferencesRepository: com.chapelotas.app.domain.repositories.PreferencesRepository
+    @ApplicationContext private val context: Context
 ) : CalendarRepository {
 
     private val contentResolver: ContentResolver = context.contentResolver
     private val criticalEventIds = mutableSetOf<Long>()
 
     companion object {
-        // Columnas de Calendarios
-        private val CALENDAR_PROJECTION = arrayOf(
-            CalendarContract.Calendars._ID,
-            CalendarContract.Calendars.CALENDAR_DISPLAY_NAME,
-            CalendarContract.Calendars.ACCOUNT_NAME,
-            CalendarContract.Calendars.CALENDAR_COLOR,
-            CalendarContract.Calendars.VISIBLE
+        private val INSTANCE_PROJECTION = arrayOf(
+            CalendarContract.Instances.EVENT_ID,
+            CalendarContract.Instances.TITLE,
+            CalendarContract.Instances.DESCRIPTION,
+            CalendarContract.Instances.BEGIN,
+            CalendarContract.Instances.END,
+            CalendarContract.Instances.ALL_DAY,
+            CalendarContract.Instances.EVENT_LOCATION,
+            CalendarContract.Instances.CALENDAR_ID,
+            CalendarContract.Instances.CALENDAR_DISPLAY_NAME
         )
-
-        // Columnas de Eventos
-        private val EVENT_PROJECTION = arrayOf(
-            CalendarContract.Events._ID,
-            CalendarContract.Events.TITLE,
-            CalendarContract.Events.DESCRIPTION,
-            CalendarContract.Events.DTSTART,
-            CalendarContract.Events.DTEND,
-            CalendarContract.Events.ALL_DAY,
-            CalendarContract.Events.EVENT_LOCATION,
-            CalendarContract.Events.CALENDAR_ID,
-            CalendarContract.Events.CALENDAR_DISPLAY_NAME
-        )
-
-        // Índices de las columnas
-        private const val CALENDAR_ID_INDEX = 0
-        private const val CALENDAR_NAME_INDEX = 1
-
         private const val EVENT_ID_INDEX = 0
         private const val EVENT_TITLE_INDEX = 1
         private const val EVENT_DESCRIPTION_INDEX = 2
@@ -75,75 +57,70 @@ class CalendarRepositoryImpl @Inject constructor(
         private const val EVENT_LOCATION_INDEX = 6
         private const val EVENT_CALENDAR_ID_INDEX = 7
         private const val EVENT_CALENDAR_NAME_INDEX = 8
+
+        private val CALENDAR_PROJECTION = arrayOf(
+            CalendarContract.Calendars._ID,
+            CalendarContract.Calendars.CALENDAR_DISPLAY_NAME
+        )
+        private const val CALENDAR_ID_INDEX = 0
+        private const val CALENDAR_NAME_INDEX = 1
+    }
+
+    override fun hasCalendarReadPermission(): Boolean {
+        return ContextCompat.checkSelfPermission(
+            context, Manifest.permission.READ_CALENDAR
+        ) == PackageManager.PERMISSION_GRANTED
     }
 
     override suspend fun getAvailableCalendars(): Map<Long, String> = withContext(Dispatchers.IO) {
-        checkCalendarPermission()
+        if (!hasCalendarReadPermission()) {
+            Log.w("CalendarRepo", "Intento de acceso a calendarios sin permiso.")
+            return@withContext emptyMap()
+        }
 
         val calendars = mutableMapOf<Long, String>()
-
         val uri: Uri = CalendarContract.Calendars.CONTENT_URI
         val selection = "${CalendarContract.Calendars.VISIBLE} = ?"
         val selectionArgs = arrayOf("1")
-
-        contentResolver.query(
-            uri,
-            CALENDAR_PROJECTION,
-            selection,
-            selectionArgs,
-            null
-        )?.use { cursor ->
-            while (cursor.moveToNext()) {
-                val id = cursor.getLong(CALENDAR_ID_INDEX)
-                val name = cursor.getString(CALENDAR_NAME_INDEX) ?: "Calendar $id"
-                calendars[id] = name
+        try {
+            contentResolver.query(uri, CALENDAR_PROJECTION, selection, selectionArgs, null)?.use { cursor ->
+                while (cursor.moveToNext()) {
+                    val id = cursor.getLong(CALENDAR_ID_INDEX)
+                    val name = cursor.getString(CALENDAR_NAME_INDEX) ?: "Calendar $id"
+                    calendars[id] = name
+                }
             }
+        } catch (e: Exception) {
+            Log.e("CalendarRepo", "Error al buscar calendarios: ${e.message}")
         }
-
         calendars
     }
 
-    override suspend fun getEventsForDate(
-        date: LocalDate,
-        calendarIds: Set<Long>?
-    ): List<CalendarEvent> = withContext(Dispatchers.IO) {
-        checkCalendarPermission()
-
+    override suspend fun getEventsForDate(date: LocalDate): List<CalendarEvent> = withContext(Dispatchers.IO) {
+        if (!hasCalendarReadPermission()) return@withContext emptyList()
         val startOfDay = date.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
         val endOfDay = date.plusDays(1).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
-
-        getEventsInTimeRange(startOfDay, endOfDay, calendarIds)
+        getEventsInTimeRange(startOfDay, endOfDay)
     }
 
-    override suspend fun getEventsInRange(
-        startDate: LocalDate,
-        endDate: LocalDate,
-        calendarIds: Set<Long>?
-    ): List<CalendarEvent> = withContext(Dispatchers.IO) {
-        checkCalendarPermission()
-
+    override suspend fun getEventsInRange(startDate: LocalDate, endDate: LocalDate): List<CalendarEvent> = withContext(Dispatchers.IO) {
+        if (!hasCalendarReadPermission()) return@withContext emptyList()
         val startMillis = startDate.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
         val endMillis = endDate.plusDays(1).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
-
-        getEventsInTimeRange(startMillis, endMillis, calendarIds)
+        getEventsInTimeRange(startMillis, endMillis)
     }
 
     override fun observeCalendarChanges(): Flow<Unit> = callbackFlow {
+        if (!hasCalendarReadPermission()) {
+            Log.w("CalendarRepo", "No se puede observar el calendario sin permisos.")
+            close(SecurityException("Permiso READ_CALENDAR denegado para observar cambios."))
+            return@callbackFlow
+        }
         val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
-            override fun onChange(selfChange: Boolean) {
-                trySend(Unit)
-            }
+            override fun onChange(selfChange: Boolean) { trySend(Unit) }
         }
-
-        contentResolver.registerContentObserver(
-            CalendarContract.Events.CONTENT_URI,
-            true,
-            observer
-        )
-
-        awaitClose {
-            contentResolver.unregisterContentObserver(observer)
-        }
+        contentResolver.registerContentObserver(CalendarContract.Events.CONTENT_URI, true, observer)
+        awaitClose { contentResolver.unregisterContentObserver(observer) }
     }
 
     override suspend fun markEventAsCritical(eventId: Long, isCritical: Boolean) {
@@ -152,55 +129,30 @@ class CalendarRepositoryImpl @Inject constructor(
         } else {
             criticalEventIds.remove(eventId)
         }
-        // En una app real, esto se guardaría en base de datos o SharedPreferences
     }
 
     override suspend fun getCriticalEventIds(): Set<Long> {
         return criticalEventIds.toSet()
     }
 
-    /**
-     * Obtiene eventos en un rango de tiempo
-     */
-    private fun getEventsInTimeRange(
-        startMillis: Long,
-        endMillis: Long,
-        calendarIds: Set<Long>?
-    ): List<CalendarEvent> {
+    private fun getEventsInTimeRange(startMillis: Long, endMillis: Long): List<CalendarEvent> {
         val events = mutableListOf<CalendarEvent>()
-
-        val uri: Uri = CalendarContract.Events.CONTENT_URI
-
-        var selection = "(${CalendarContract.Events.DTSTART} >= ? AND ${CalendarContract.Events.DTSTART} <= ?)"
-        val selectionArgsList = mutableListOf(startMillis.toString(), endMillis.toString())
-
-        // Filtrar por calendarios si se especifican
-        if (!calendarIds.isNullOrEmpty()) {
-            selection += " AND ${CalendarContract.Events.CALENDAR_ID} IN (${calendarIds.joinToString(",") { "?" }})"
-            selectionArgsList.addAll(calendarIds.map { it.toString() })
+        val builder: Uri.Builder = CalendarContract.Instances.CONTENT_URI.buildUpon()
+        ContentUris.appendId(builder, startMillis)
+        ContentUris.appendId(builder, endMillis)
+        try {
+            contentResolver.query(builder.build(), INSTANCE_PROJECTION, null, null, "${CalendarContract.Instances.BEGIN} ASC")
+                ?.use { cursor ->
+                    while (cursor.moveToNext()) {
+                        events.add(parseEventFromCursor(cursor))
+                    }
+                }
+        } catch (e: Exception) {
+            Log.e("CalendarRepo", "ERROR al consultar eventos: ${e.message}")
         }
-
-        val selectionArgs = selectionArgsList.toTypedArray()
-
-        contentResolver.query(
-            uri,
-            EVENT_PROJECTION,
-            selection,
-            selectionArgs,
-            "${CalendarContract.Events.DTSTART} ASC"
-        )?.use { cursor ->
-            while (cursor.moveToNext()) {
-                val event = parseEventFromCursor(cursor)
-                events.add(event)
-            }
-        }
-
         return events
     }
 
-    /**
-     * Parsea un evento desde el cursor
-     */
     private fun parseEventFromCursor(cursor: Cursor): CalendarEvent {
         val id = cursor.getLong(EVENT_ID_INDEX)
         val title = cursor.getString(EVENT_TITLE_INDEX) ?: "Sin título"
@@ -211,17 +163,8 @@ class CalendarRepositoryImpl @Inject constructor(
         val location = cursor.getString(EVENT_LOCATION_INDEX)
         val calendarId = cursor.getLong(EVENT_CALENDAR_ID_INDEX)
         val calendarName = cursor.getString(EVENT_CALENDAR_NAME_INDEX) ?: "Calendar"
-
-        val startTime = LocalDateTime.ofInstant(
-            Instant.ofEpochMilli(startMillis),
-            ZoneId.systemDefault()
-        )
-
-        val endTime = LocalDateTime.ofInstant(
-            Instant.ofEpochMilli(endMillis),
-            ZoneId.systemDefault()
-        )
-
+        val startTime = LocalDateTime.ofInstant(Instant.ofEpochMilli(startMillis), ZoneId.systemDefault())
+        val endTime = LocalDateTime.ofInstant(Instant.ofEpochMilli(endMillis), ZoneId.systemDefault())
         return CalendarEvent(
             id = id,
             title = title,
@@ -234,18 +177,5 @@ class CalendarRepositoryImpl @Inject constructor(
             calendarName = calendarName,
             isCritical = id in criticalEventIds
         )
-    }
-
-    /**
-     * Verifica que tenemos permisos de calendario
-     */
-    private fun checkCalendarPermission() {
-        if (ContextCompat.checkSelfPermission(
-                context,
-                Manifest.permission.READ_CALENDAR
-            ) != PackageManager.PERMISSION_GRANTED
-        ) {
-            throw SecurityException("No hay permisos para leer el calendario")
-        }
     }
 }

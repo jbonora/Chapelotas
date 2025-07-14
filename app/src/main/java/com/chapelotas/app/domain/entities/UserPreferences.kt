@@ -13,8 +13,8 @@ data class UserPreferences(
     val notificationSound: String = "default_notification",
     val minutesBeforeEventForReminder: Int = 15,
     val hasAcceptedPrivacyPolicy: Boolean = false,
-    val isFirstTimeUser: Boolean = true,
-    val preferredCalendars: Set<Long> = emptySet()  // IDs de calendarios a monitorear
+    val isFirstTimeUser: Boolean = true
+    // El campo "preferredCalendars" ha sido eliminado.
 ) {
     /**
      * Verifica si es hora del resumen diario
