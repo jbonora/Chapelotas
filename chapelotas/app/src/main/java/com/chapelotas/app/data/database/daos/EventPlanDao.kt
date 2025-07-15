@@ -40,17 +40,17 @@ interface EventPlanDao {
 
     // ACTUALIZADO: Ahora marca userModified = 1 cuando el usuario cambia la criticidad
     @Query("UPDATE event_plans SET isCritical = :isCritical, userModified = 1, updatedAt = :now WHERE eventId = :eventId")
-    suspend fun updateCritical(eventId: String, isCritical: Boolean, now: LocalDateTime = LocalDateTime.now())
+    suspend fun updateCritical(eventId: String, isCritical: Boolean, now: LocalDateTime = LocalDateTime.now(ZoneId.systemDefault()))
 
     // ACTUALIZADO: Ahora marca userModified = 1 cuando el usuario cambia la distancia
     @Query("UPDATE event_plans SET distance = :distance, userModified = 1, updatedAt = :now WHERE eventId = :eventId")
-    suspend fun updateDistance(eventId: String, distance: EventDistance, now: LocalDateTime = LocalDateTime.now())
+    suspend fun updateDistance(eventId: String, distance: EventDistance, now: LocalDateTime = LocalDateTime.now(ZoneId.systemDefault()))
 
     @Query("SELECT * FROM event_plans WHERE endTime < :currentTime AND resolutionStatus = 'PENDING' ORDER BY startTime DESC")
-    suspend fun getPastUnresolvedEvents(currentTime: LocalDateTime = LocalDateTime.now()): List<EventPlan>
+    suspend fun getPastUnresolvedEvents(currentTime: LocalDateTime = LocalDateTime.now(ZoneId.systemDefault())): List<EventPlan>
 
     @Query("UPDATE event_plans SET resolutionStatus = :status, updatedAt = :now WHERE eventId = :eventId")
-    suspend fun updateResolutionStatus(eventId: String, status: EventResolutionStatus, now: LocalDateTime = LocalDateTime.now())
+    suspend fun updateResolutionStatus(eventId: String, status: EventResolutionStatus, now: LocalDateTime = LocalDateTime.now(ZoneId.systemDefault()))
 
     @Query("UPDATE event_plans SET notificationsSent = notificationsSent + 1, lastNotificationTime = :time WHERE eventId = :eventId")
     suspend fun incrementNotificationCount(eventId: String, time: LocalDateTime)

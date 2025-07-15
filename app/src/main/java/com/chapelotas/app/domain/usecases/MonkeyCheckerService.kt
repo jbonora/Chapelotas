@@ -10,6 +10,7 @@ import kotlinx.coroutines.*
 import java.io.File
 import java.time.LocalTime
 import java.time.LocalDateTime
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -223,7 +224,7 @@ class MonkeyCheckerService @Inject constructor(
         val notification = ChapelotasNotification(
             id = System.currentTimeMillis().toString(),
             eventId = 0L,
-            scheduledTime = LocalDateTime.now(),
+            scheduledTime = LocalDateTime.now(ZoneId.systemDefault()),
             message = mensaje,
             priority = NotificationPriority.NORMAL,
             type = NotificationType.EVENT_REMINDER
@@ -236,7 +237,7 @@ class MonkeyCheckerService @Inject constructor(
         val notification = ChapelotasNotification(
             id = System.currentTimeMillis().toString(),
             eventId = 0L,
-            scheduledTime = LocalDateTime.now(),
+            scheduledTime = LocalDateTime.now(ZoneId.systemDefault()),
             message = mensaje,
             priority = NotificationPriority.CRITICAL,
             type = NotificationType.CRITICAL_ALERT

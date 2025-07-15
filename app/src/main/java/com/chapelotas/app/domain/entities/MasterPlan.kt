@@ -2,12 +2,13 @@ package com.chapelotas.app.domain.entities
 
 import com.google.gson.annotations.SerializedName
 import java.time.LocalDateTime
+import java.time.ZoneId
 
 /**
  * JSON Maestro que el mono entiende
  */
 data class MasterPlan(
-    val version: String = LocalDateTime.now().toString(),
+    val version: String = LocalDateTime.now(ZoneId.systemDefault()).toString(),
     val usuario: String = "",
     @SerializedName("modo_sarcastico")
     val modoSarcastico: Boolean = false,

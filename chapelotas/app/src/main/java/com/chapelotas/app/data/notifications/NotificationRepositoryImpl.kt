@@ -241,7 +241,7 @@ class NotificationRepositoryImpl @Inject constructor(
     }
 
     override suspend fun cleanOldNotifications(daysToKeep: Int) {
-        val cutoffDate = LocalDateTime.now().minusDays(daysToKeep.toLong())
+        val cutoffDate = LocalDateTime.now(ZoneId.systemDefault()).minusDays(daysToKeep.toLong())
         val filtered = _notificationsFlow.value.filter { notification ->
             !notification.hasBeenShown || notification.createdAt.isAfter(cutoffDate)
         }

@@ -54,7 +54,7 @@ class ShowCriticalAlertUseCase @Inject constructor(
             val criticalNotification = ChapelotasNotification(
                 id = java.util.UUID.randomUUID().toString(),
                 eventId = eventId,
-                scheduledTime = java.time.LocalDateTime.now(),
+                scheduledTime = java.time.LocalDateTime.now(ZoneId.systemDefault()),
                 message = criticalMessage,
                 priority = NotificationPriority.CRITICAL,
                 type = NotificationType.CRITICAL_ALERT

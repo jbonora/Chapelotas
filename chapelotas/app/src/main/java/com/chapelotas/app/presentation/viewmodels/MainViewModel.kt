@@ -213,7 +213,7 @@ class MainViewModel @Inject constructor(
                             // Registrar en el log
                             database.conversationLogDao().insert(
                                 ConversationLog(
-                                    timestamp = LocalDateTime.now(),
+                                    timestamp = LocalDateTime.now(ZoneId.systemDefault()),
                                     role = "user",
                                     content = "✅ Marqué como completado: ${event.title}",
                                     eventId = eventId
@@ -230,7 +230,7 @@ class MainViewModel @Inject constructor(
 
                             database.conversationLogDao().insert(
                                 ConversationLog(
-                                    timestamp = LocalDateTime.now().plusSeconds(1),
+                                    timestamp = LocalDateTime.now(ZoneId.systemDefault()).plusSeconds(1),
                                     role = "assistant",
                                     content = response
                                 )
@@ -246,7 +246,7 @@ class MainViewModel @Inject constructor(
                         val event = database.eventPlanDao().getEvent(eventId)
                         if (event != null) {
                             val notifications = database.notificationDao().getActiveNotificationsForEvent(eventId)
-                            val snoozeTime = LocalDateTime.now().plusMinutes(15)
+                            val snoozeTime = LocalDateTime.now(ZoneId.systemDefault()).plusMinutes(15)
 
                             notifications.forEach { notification ->
                                 database.notificationDao().snooze(
@@ -258,7 +258,7 @@ class MainViewModel @Inject constructor(
                             // Registrar en el log
                             database.conversationLogDao().insert(
                                 ConversationLog(
-                                    timestamp = LocalDateTime.now(),
+                                    timestamp = LocalDateTime.now(ZoneId.systemDefault()),
                                     role = "user",
                                     content = "⏰ Pospuse 15 minutos: ${event.title}",
                                     eventId = eventId
@@ -275,7 +275,7 @@ class MainViewModel @Inject constructor(
 
                             database.conversationLogDao().insert(
                                 ConversationLog(
-                                    timestamp = LocalDateTime.now().plusSeconds(1),
+                                    timestamp = LocalDateTime.now(ZoneId.systemDefault()).plusSeconds(1),
                                     role = "assistant",
                                     content = response
                                 )
@@ -305,13 +305,13 @@ class MainViewModel @Inject constructor(
 
                 // Borrar todos los logs
                 database.conversationLogDao().deleteOldLogs(
-                    LocalDateTime.now().plusDays(1) // Fecha futura para borrar todo
+                    LocalDateTime.now(ZoneId.systemDefault()).plusDays(1) // Fecha futura para borrar todo
                 )
 
                 // Agregar un mensaje de confirmación
                 database.conversationLogDao().insert(
                     ConversationLog(
-                        timestamp = LocalDateTime.now(),
+                        timestamp = LocalDateTime.now(ZoneId.systemDefault()),
                         role = "assistant",
                         content = "💨 Historial borrado. ¡Empecemos de nuevo! Como si no hubiera pasado nada... 😉",
                         eventId = null

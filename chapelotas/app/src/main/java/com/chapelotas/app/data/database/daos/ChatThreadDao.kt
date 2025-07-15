@@ -18,7 +18,7 @@ interface ChatThreadDao {
     fun observeActiveThreads(): Flow<List<ChatThread>>
 
     @Query("UPDATE chat_threads SET lastMessage = :message, lastMessageTime = :time, unreadCount = unreadCount + 1 WHERE threadId = :threadId")
-    suspend fun updateLastMessage(threadId: String, message: String, time: LocalDateTime = LocalDateTime.now())
+    suspend fun updateLastMessage(threadId: String, message: String, time: LocalDateTime = LocalDateTime.now(ZoneId.systemDefault()))
 
     @Query("UPDATE chat_threads SET unreadCount = 0 WHERE threadId = :threadId")
     suspend fun markAsRead(threadId: String)

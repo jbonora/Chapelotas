@@ -163,7 +163,7 @@ class AIRepositoryImpl @Inject constructor() : AIRepository {
         3. REGLA DE ORO (NO INVENTAR): Está terminantemente prohibido inventar o sugerir actividades que no estén en la lista de DATOS. Cíñete exclusivamente a la información del calendario que te entrego.
         4. MANEJO DE DÍA VACÍO: Si en la sección de DATOS te entrego "Ninguna" tarea, tienes PROHIBIDO mencionar la palabra "tareas" o "actividades". En su lugar, simplemente desea un buen día o una buena noche de forma cordial.
         ### DATOS ###
-        Hora Actual: ${LocalDateTime.now().format(DateTimeFormatter.ofPattern("HH:mm"))}
+        Hora Actual: ${LocalDateTime.now(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("HH:mm"))}
         Tareas Pendientes:
         - ${eventsText}
         """.trimIndent()
@@ -182,7 +182,7 @@ class AIRepositoryImpl @Inject constructor() : AIRepository {
         3. REGLA DE ORO (NO INVENTAR): Está terminantemente prohibido inventar o sugerir actividades que no estén en la lista de DATOS. Cíñete exclusivamente a la información del calendario que te entrego.
         4. MANEJO DE DÍA VACÍO: Si en la sección de DATOS te entrego "Ninguna" tarea, tienes PROHIBIDO mencionar la palabra "tareas" o "actividades". En su lugar, haz un comentario ingenioso sobre la falta de actividad (la "vagancia").
         ### DATOS ###
-        Hora Actual: ${LocalDateTime.now().format(DateTimeFormatter.ofPattern("HH:mm"))}
+        Hora Actual: ${LocalDateTime.now(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("HH:mm"))}
         Tareas Pendientes:
         - ${eventsText}
         """.trimIndent()
@@ -193,7 +193,7 @@ class AIRepositoryImpl @Inject constructor() : AIRepository {
     override suspend fun generateTomorrowSummary(tomorrowEvents: List<CalendarEvent>, todayContext: String?, isSarcastic: Boolean): String = generateSimulatedTomorrowSummary(tomorrowEvents, isSarcastic)
     override suspend fun callOpenAIForText(prompt: String, temperature: Double): String = try { openAIApi.createChatCompletion(authorization = "Bearer $apiKey", request = ChatCompletionRequest(messages = listOf(Message("user", prompt)), temperature = temperature)).choices.firstOrNull()?.message?.content?.trim() ?: "No pude generar una respuesta." } catch (e: Exception) { "Error de conexión con la IA de Chapelotas." }
     private fun generateSimulatedEventPlan(event: CalendarEvent): List<PlannedNotification> = if (listOf("examen", "vuelo", "médico", "entrevista", "jefe", "final").any { event.title.contains(it, ignoreCase = true) }) { listOf(PlannedNotification(event.id, event.startTime.minusMinutes(15), "¡ATENCIÓN! Evento crítico '${event.title}' en 15 minutos.", com.chapelotas.app.domain.entities.NotificationPriority.CRITICAL, com.chapelotas.app.domain.entities.NotificationType.EVENT_REMINDER, null, false)) } else { listOf(PlannedNotification(event.id, event.startTime.minusMinutes(15), "Recordatorio: ${event.title} en 15 minutos.", com.chapelotas.app.domain.entities.NotificationPriority.NORMAL, com.chapelotas.app.domain.entities.NotificationType.EVENT_REMINDER, null, false)) }
-    private fun generateSimulatedPlan(events: List<CalendarEvent>): AIPlan = AIPlan(UUID.randomUUID().toString(), LocalDateTime.now(), events.map { it.id }, events.map { PlannedNotification(it.id, it.startTime.minusMinutes(15), "Recordatorio: ${it.title}", com.chapelotas.app.domain.entities.NotificationPriority.NORMAL, com.chapelotas.app.domain.entities.NotificationType.EVENT_REMINDER, null, false) }, "Modo simulado activado", "Revisar eventos.")
+    private fun generateSimulatedPlan(events: List<CalendarEvent>): AIPlan = AIPlan(UUID.randomUUID().toString(), LocalDateTime.now(ZoneId.systemDefault()), events.map { it.id }, events.map { PlannedNotification(it.id, it.startTime.minusMinutes(15), "Recordatorio: ${it.title}", com.chapelotas.app.domain.entities.NotificationPriority.NORMAL, com.chapelotas.app.domain.entities.NotificationType.EVENT_REMINDER, null, false) }, "Modo simulado activado", "Revisar eventos.")
     private fun generateSimulatedMessage(event: CalendarEvent, messageType: String, isSarcastic: Boolean): String = if (isSarcastic) "Che, ${event.title} en ${event.timeUntilStartDescription()}." else "Recordatorio: ${event.title} en ${event.timeUntilStartDescription()}."
     private fun generateSimulatedDailySummary(events: List<CalendarEvent>, isSarcastic: Boolean): String = if (isSarcastic) { if (events.isEmpty()) "Hoy te la pasás mirando el techo, parece. Cero eventos." else "Hoy tenés ${events.size} cosas. A ver si las hacés." } else { if (events.isEmpty()) "No tienes eventos para hoy. ¡Disfruta tu día!" else "Hoy tienes ${events.size} eventos programados." }
     private fun generateSimulatedTomorrowSummary(events: List<CalendarEvent>, isSarcastic: Boolean): String = if (isSarcastic) { if (events.isEmpty()) "Mañana pinta para la reposera. Nada en la agenda." else "Mañana hay ${events.size} eventos. Andá preparándote." } else { if (events.isEmpty()) "No tienes eventos para mañana." else "Mañana tienes ${events.size} eventos programados." }

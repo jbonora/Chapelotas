@@ -18,7 +18,7 @@ interface ChatThreadDao {
     fun observeActiveThreads(): Flow<List<ChatThread>>
 
     @Query("UPDATE chat_threads SET lastMessage = :message, lastMessageTime = :time, unreadCount = unreadCount + 1 WHERE threadId = :threadId")
-    suspend fun updateLastMessage(threadId: String, message: String, time: LocalDateTime = LocalDateTime.now())
+    suspend fun updateLastMessage(threadId: String, message: String, time: LocalDateTime = LocalDateTime.now(java.time.ZoneId.systemDefault()))
 
     @Query("UPDATE chat_threads SET unreadCount = 0 WHERE threadId = :threadId")
     suspend fun markAsRead(threadId: String)
@@ -38,4 +38,7 @@ interface ChatThreadDao {
     // Para obtener threads por tipo
     @Query("SELECT * FROM chat_threads WHERE threadType = :type AND status != 'ARCHIVED' ORDER BY lastMessageTime DESC")
     suspend fun getThreadsByType(type: String): List<ChatThread>
+
+    @Query("SELECT * FROM chat_threads WHERE threadId = :threadId")
+    fun observeThread(threadId: String): Flow<ChatThread?>
 }

@@ -19,7 +19,7 @@ data class DayPlan(
     @ColumnInfo(defaultValue = "18:00")
     var workEndTime: LocalTime = LocalTime.of(18, 0),
 
-    @ColumnInfo(defaultValue = "0")
+    @ColumnInfo(defaultValue = "1")  // CAMBIADO: "1" = true para que coincida con el valor inicial
     var is24hMode: Boolean = true,
 
     // --- CAMBIO CLAVE AQUÍ ---

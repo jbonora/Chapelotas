@@ -26,7 +26,7 @@ data class MonkeyAgenda(
     val status: String = "PENDING",
 
     // Cuándo se creó esta entrada
-    val createdAt: LocalDateTime = LocalDateTime.now(),
+    val createdAt: LocalDateTime = LocalDateTime.now(ZoneId.systemDefault()),
 
     // Cuándo se procesó (null si aún no se procesó)
     val processedAt: LocalDateTime? = null

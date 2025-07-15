@@ -69,7 +69,7 @@ class AIRepositoryImpl @Inject constructor() : AIRepository {
         
         return AIPlan(
             id = java.util.UUID.randomUUID().toString(),
-            generatedAt = LocalDateTime.now(),
+            generatedAt = LocalDateTime.now(ZoneId.systemDefault()),
             eventsAnalyzed = events.map { it.id },
             notifications = notifications,
             aiInsights = generateInsights(events),

@@ -55,7 +55,7 @@ class UnifiedMonkeyService @Inject constructor(
         // Cancelar notificaciones anteriores del evento
         database.monkeyAgendaDao().cancelPendingForEvent(event.eventId)
 
-        val now = LocalDateTime.now()
+        val now = LocalDateTime.now(ZoneId.systemDefault())
 
         if (event.isCritical) {
             // Eventos críticos: programar llamadas directas
@@ -87,7 +87,7 @@ class UnifiedMonkeyService @Inject constructor(
      * Programa llamadas críticas (siguen usando AlarmManager directo)
      */
     private fun scheduleCriticalEventCalls(event: EventPlan) {
-        val now = LocalDateTime.now()
+        val now = LocalDateTime.now(ZoneId.systemDefault())
         val criticalTimes = listOf(60, 30, 15, 5) // minutos antes
 
         criticalTimes.forEach { minutesBefore ->
@@ -180,7 +180,7 @@ class UnifiedMonkeyService @Inject constructor(
             setExactAlarm(nextTime)
         } else {
             // Si no hay nada pendiente, programar chequeo en 1 hora
-            val nextCheckTime = LocalDateTime.now().plusHours(1)
+            val nextCheckTime = LocalDateTime.now(ZoneId.systemDefault()).plusHours(1)
 
             // Programar chequeo de inactividad
             monkeyAgendaService.scheduleAction(
@@ -195,7 +195,7 @@ class UnifiedMonkeyService @Inject constructor(
     private fun setExactAlarm(triggerTime: LocalDateTime) {
         cancelAlarm()
 
-        val now = LocalDateTime.now()
+        val now = LocalDateTime.now(ZoneId.systemDefault())
 
         // PROTECCIÓN ANTI-LOOP
         val minFutureTime = now.plusMinutes(1)

@@ -32,7 +32,7 @@ class MigrateToMonkeyAgendaUseCase @Inject constructor(
             todayEvents.forEach { event ->
                 // Solo migrar eventos pendientes
                 if (event.resolutionStatus.name != "COMPLETED") {
-                    val now = LocalDateTime.now()
+                    val now = LocalDateTime.now(ZoneId.systemDefault())
 
                     // Programar notificaciones según la distancia del evento
                     val notificationTimes = event.getNotificationMinutesList()
@@ -89,7 +89,7 @@ class MigrateToMonkeyAgendaUseCase @Inject constructor(
     private suspend fun cleanupOldNotifications() {
         try {
             // Marcar todas las notificaciones viejas como ejecutadas
-            val oldNotifications = database.notificationDao().getPendingNotifications(LocalDateTime.now())
+            val oldNotifications = database.notificationDao().getPendingNotifications(LocalDateTime.now(ZoneId.systemDefault()))
 
             oldNotifications.forEach { notification ->
                 database.notificationDao().markAsExecuted(notification.notificationId)

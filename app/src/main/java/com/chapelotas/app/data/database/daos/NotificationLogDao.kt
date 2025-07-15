@@ -4,6 +4,7 @@ import androidx.room.*
 import com.chapelotas.app.data.database.entities.NotificationLog
 import com.chapelotas.app.data.database.entities.UserAction
 import java.time.LocalDateTime
+import java.time.ZoneId
 
 @Dao
 interface NotificationLogDao {
@@ -11,7 +12,7 @@ interface NotificationLogDao {
     suspend fun insert(log: NotificationLog): Long
 
     @Query("UPDATE notification_logs SET userAction = :action, actionTimestamp = :timestamp, responseTimeSeconds = :responseTime WHERE logId = :logId")
-    suspend fun updateUserAction(logId: Long, action: UserAction, timestamp: LocalDateTime = LocalDateTime.now(), responseTime: Long)
+    suspend fun updateUserAction(logId: Long, action: UserAction, timestamp: LocalDateTime = LocalDateTime.now(ZoneId.systemDefault()), responseTime: Long)
 
     @Query("SELECT * FROM notification_logs WHERE eventId = :eventId ORDER BY shownAt DESC")
     suspend fun getLogsByEvent(eventId: String): List<NotificationLog>
@@ -29,7 +30,7 @@ interface NotificationLogDao {
             notificationId = notification.notificationId,
             eventId = event.eventId,
             eventTitle = event.title,
-            shownAt = LocalDateTime.now(),
+            shownAt = LocalDateTime.now(ZoneId.systemDefault()),
             minutesBeforeEvent = notification.minutesBefore,
             type = notification.type,
             priority = notification.priority,

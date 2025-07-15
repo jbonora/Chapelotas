@@ -7,6 +7,7 @@ import com.chapelotas.app.domain.repositories.AIRepository
 import com.chapelotas.app.domain.repositories.CalendarRepository
 import com.chapelotas.app.domain.repositories.NotificationRepository
 import com.chapelotas.app.domain.repositories.PreferencesRepository
+import java.time.ZoneId
 import javax.inject.Inject
 
 /**
@@ -54,7 +55,7 @@ class ShowCriticalAlertUseCase @Inject constructor(
             val criticalNotification = ChapelotasNotification(
                 id = java.util.UUID.randomUUID().toString(),
                 eventId = eventId,
-                scheduledTime = java.time.LocalDateTime.now(),
+                scheduledTime = java.time.LocalDateTime.now(ZoneId.systemDefault()),
                 message = criticalMessage,
                 priority = NotificationPriority.CRITICAL,
                 type = NotificationType.CRITICAL_ALERT

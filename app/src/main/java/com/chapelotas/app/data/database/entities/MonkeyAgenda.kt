@@ -3,6 +3,7 @@ package com.chapelotas.app.data.database.entities
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 import java.time.LocalDateTime
+import java.time.ZoneId
 
 /**
  * Tabla principal del mono - Una sola fuente de verdad para todas las acciones
@@ -26,7 +27,7 @@ data class MonkeyAgenda(
     val status: String = "PENDING",
 
     // Cuándo se creó esta entrada
-    val createdAt: LocalDateTime = LocalDateTime.now(),
+    val createdAt: LocalDateTime = LocalDateTime.now(ZoneId.systemDefault()),
 
     // Cuándo se procesó (null si aún no se procesó)
     val processedAt: LocalDateTime? = null

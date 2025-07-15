@@ -23,7 +23,7 @@ data class ChatThread(
     val lastMessage: String = "",
 
     // Hora del último mensaje (para ordenar)
-    val lastMessageTime: LocalDateTime = LocalDateTime.now(),
+    val lastMessageTime: LocalDateTime = LocalDateTime.now(ZoneId.systemDefault()),
 
     // Cantidad de mensajes sin leer
     val unreadCount: Int = 0,
@@ -38,5 +38,5 @@ data class ChatThread(
     val eventTime: LocalDateTime? = null,
 
     // Fecha de creación del thread
-    val createdAt: LocalDateTime = LocalDateTime.now()
+    val createdAt: LocalDateTime = LocalDateTime.now(ZoneId.systemDefault())
 )

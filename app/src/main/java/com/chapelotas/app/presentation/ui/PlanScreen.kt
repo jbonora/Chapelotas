@@ -2,6 +2,7 @@ package com.chapelotas.app.presentation.ui
 
 import android.content.ContentUris
 import android.content.Intent
+import androidx.compose.runtime.getValue
 import android.provider.CalendarContract
 import android.widget.Toast
 import androidx.compose.animation.animateColorAsState
@@ -31,6 +32,7 @@ import com.chapelotas.app.presentation.viewmodels.CalendarMonitorViewModel
 import com.chapelotas.app.presentation.viewmodels.MainViewModel
 import java.time.Duration
 import java.time.LocalDateTime
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -72,7 +74,7 @@ fun PlanScreen(
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text(if (isMonitoring) "🐵 Mono Vigilando" else "⚠️ Mono Detenido", fontWeight = FontWeight.Bold)
                             val nextCheckText = nextCheckTime?.let {
-                                val duration = Duration.between(LocalDateTime.now(), it)
+                                val duration = Duration.between(LocalDateTime.now(ZoneId.systemDefault()), it)
                                 if (duration.isNegative) "Ahora" else "en ${duration.toMinutes() + 1} min"
                             } ?: "--:--"
                             Text("Próximo aviso: $nextCheckText", style = MaterialTheme.typography.bodySmall)
@@ -226,7 +228,7 @@ fun EventCardWithRoom(
                 Spacer(modifier = Modifier.height(8.dp))
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     Icon(Icons.Default.Notifications, contentDescription = "Próximo aviso", modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    val duration = Duration.between(LocalDateTime.now(), nextNotification.scheduledTime)
+                    val duration = Duration.between(LocalDateTime.now(ZoneId.systemDefault()), nextNotification.scheduledTime)
                     val timeText = when {
                         duration.isNegative || duration.isZero -> "ahora"
                         duration.toMinutes() < 60 -> "en ${duration.toMinutes() + 1} min"

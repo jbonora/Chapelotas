@@ -50,4 +50,18 @@ interface ConversationLogDao {
     // Para migración: actualizar mensajes viejos con threadId
     @Query("UPDATE conversation_logs SET threadId = :threadId WHERE eventId = :eventId AND threadId IS NULL")
     suspend fun updateThreadIdForEvent(eventId: String, threadId: String)
+
+    // ===== MÉTODOS ADICIONALES PARA MIGRACIÓN COMPLETA =====
+
+    // Actualizar threadId de un mensaje específico
+    @Query("UPDATE conversation_logs SET threadId = :threadId WHERE logId = :logId")
+    suspend fun updateThreadId(logId: Long, threadId: String)
+
+    // Obtener mensajes sin thread asignado
+    @Query("SELECT * FROM conversation_logs WHERE threadId IS NULL OR threadId = ''")
+    suspend fun getMessagesWithoutThread(): List<ConversationLog>
+
+    // Actualizar mensajes sin thread al thread general
+    @Query("UPDATE conversation_logs SET threadId = 'general' WHERE threadId IS NULL OR threadId = ''")
+    suspend fun assignOrphanMessagesToGeneral()
 }

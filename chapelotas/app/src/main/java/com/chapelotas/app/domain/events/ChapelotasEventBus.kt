@@ -42,7 +42,7 @@ class ChapelotasEventBus @Inject constructor() {
  * Todos los componentes pueden escuchar estos eventos
  */
 sealed class ChapelotasEvent {
-    val timestamp: LocalDateTime = LocalDateTime.now()
+    val timestamp: LocalDateTime = LocalDateTime.now(ZoneId.systemDefault())
 
     // ===== EVENTOS DEL CALENDARIO =====
     data class NewEventDetected(

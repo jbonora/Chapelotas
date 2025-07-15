@@ -28,6 +28,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.time.LocalDateTime
+import java.time.ZoneId
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -241,7 +242,7 @@ class NotificationRepositoryImpl @Inject constructor(
     }
 
     override suspend fun cleanOldNotifications(daysToKeep: Int) {
-        val cutoffDate = LocalDateTime.now().minusDays(daysToKeep.toLong())
+        val cutoffDate = LocalDateTime.now(ZoneId.systemDefault()).minusDays(daysToKeep.toLong())
         val filtered = _notificationsFlow.value.filter { notification ->
             !notification.hasBeenShown || notification.createdAt.isAfter(cutoffDate)
         }

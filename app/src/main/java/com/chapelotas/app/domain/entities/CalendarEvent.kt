@@ -1,6 +1,7 @@
 package com.chapelotas.app.domain.entities
 
 import java.time.LocalDateTime
+import java.time.ZoneId
 
 /**
  * Representa un evento del calendario
@@ -26,8 +27,8 @@ data class CalendarEvent(
                 id = 0,
                 title = "Chequeo proactivo",
                 description = null,
-                startTime = LocalDateTime.now(),
-                endTime = LocalDateTime.now(),
+                startTime = LocalDateTime.now(ZoneId.systemDefault()),
+                endTime = LocalDateTime.now(ZoneId.systemDefault()),
                 location = null,
                 isAllDay = true,
                 calendarId = 0,
@@ -42,17 +43,17 @@ data class CalendarEvent(
         get() = java.time.Duration.between(startTime, endTime).toMinutes()
 
     fun isToday(): Boolean {
-        val today = LocalDateTime.now().toLocalDate()
+        val today = LocalDateTime.now(ZoneId.systemDefault()).toLocalDate()
         return startTime.toLocalDate() == today
     }
 
     fun isTomorrow(): Boolean {
-        val tomorrow = LocalDateTime.now().toLocalDate().plusDays(1)
+        val tomorrow = LocalDateTime.now(ZoneId.systemDefault()).toLocalDate().plusDays(1)
         return startTime.toLocalDate() == tomorrow
     }
 
     fun minutesUntilStart(): Long {
-        return java.time.Duration.between(LocalDateTime.now(), startTime).toMinutes()
+        return java.time.Duration.between(LocalDateTime.now(ZoneId.systemDefault()), startTime).toMinutes()
     }
 
     fun timeUntilStartDescription(): String {

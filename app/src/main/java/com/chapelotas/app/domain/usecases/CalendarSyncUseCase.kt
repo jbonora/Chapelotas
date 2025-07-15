@@ -7,6 +7,7 @@ import com.chapelotas.app.domain.events.ChapelotasEvent
 import com.chapelotas.app.domain.events.ChapelotasEventBus
 import com.chapelotas.app.domain.repositories.CalendarRepository
 import java.time.LocalDate
+import java.time.ZoneId
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -75,7 +76,7 @@ class CalendarSyncUseCase @Inject constructor(
                             endTime = calendarEvent.endTime,
                             location = calendarEvent.location,
                             description = calendarEvent.description,
-                            updatedAt = java.time.LocalDateTime.now()
+                            updatedAt = java.time.LocalDateTime.now(ZoneId.systemDefault())
                         )
 
                         database.eventPlanDao().update(updatedEvent)

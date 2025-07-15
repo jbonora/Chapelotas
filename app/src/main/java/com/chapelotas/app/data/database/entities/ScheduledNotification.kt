@@ -5,6 +5,7 @@ import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
 import java.time.LocalDateTime
+import java.time.ZoneId
 import java.util.UUID
 
 /**
@@ -44,13 +45,13 @@ data class ScheduledNotification(
     val message: String? = null,
     val aiReason: String? = null,
     val workManagerId: String? = null,
-    val createdAt: LocalDateTime = LocalDateTime.now(),
+    val createdAt: LocalDateTime = LocalDateTime.now(ZoneId.systemDefault()),
 
     // --- CAMBIO CLAVE: El nuevo campo para contar la insistencia ---
     val timesShown: Int = 0
 ) {
     fun shouldShowNow(): Boolean {
-        val now = LocalDateTime.now()
+        val now = LocalDateTime.now(ZoneId.systemDefault())
         val targetTime = snoozedUntil ?: scheduledTime
         return !executed && !dismissed && now.isAfter(targetTime)
     }
@@ -61,7 +62,7 @@ data class ScheduledNotification(
 
     fun snooze(minutes: Int): ScheduledNotification {
         return copy(
-            snoozedUntil = LocalDateTime.now().plusMinutes(minutes.toLong()),
+            snoozedUntil = LocalDateTime.now(ZoneId.systemDefault()).plusMinutes(minutes.toLong()),
             snoozeCount = snoozeCount + 1
         )
     }

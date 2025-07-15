@@ -74,7 +74,7 @@ class CalendarSyncUseCase @Inject constructor(
                             endTime = calendarEvent.endTime,
                             location = calendarEvent.location,
                             description = calendarEvent.description,
-                            updatedAt = java.time.LocalDateTime.now()
+                            updatedAt = java.time.LocalDateTime.now(ZoneId.systemDefault())
                         )
 
                         database.eventPlanDao().update(updatedEvent)

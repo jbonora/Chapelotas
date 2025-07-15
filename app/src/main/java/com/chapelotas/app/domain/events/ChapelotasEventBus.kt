@@ -6,6 +6,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.filter // Import the filter operator
 import kotlinx.coroutines.flow.map    // Import the map operator
 import java.time.LocalDateTime
+import java.time.ZoneId
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -42,7 +43,7 @@ class ChapelotasEventBus @Inject constructor() {
  * Todos los componentes pueden escuchar estos eventos
  */
 sealed class ChapelotasEvent {
-    val timestamp: LocalDateTime = LocalDateTime.now()
+    val timestamp: LocalDateTime = LocalDateTime.now(ZoneId.systemDefault())
 
     // ===== EVENTOS DEL CALENDARIO =====
     data class NewEventDetected(

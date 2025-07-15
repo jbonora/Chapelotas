@@ -41,13 +41,13 @@ class NotificationActionHandler @Inject constructor(
                 val event = database.eventPlanDao().getEvent(actualEventId)
 
                 database.conversationLogDao().insert(ConversationLog(
-                    timestamp = LocalDateTime.now(),
+                    timestamp = LocalDateTime.now(ZoneId.systemDefault()),
                     role = "user",
                     content = "Acción: POSPONER ${snoozeMinutes}min para el evento '${event?.title ?: "sin título"}'.",
                     eventId = actualEventId
                 ))
 
-                val snoozeUntil = LocalDateTime.now().plusMinutes(snoozeMinutes.toLong())
+                val snoozeUntil = LocalDateTime.now(ZoneId.systemDefault()).plusMinutes(snoozeMinutes.toLong())
                 database.notificationDao().snooze(notificationId, snoozeUntil)
 
                 Log.d(TAG, "✅ Snooze actualizado en DB hasta: $snoozeUntil")
@@ -73,7 +73,7 @@ class NotificationActionHandler @Inject constructor(
 
                 val event = database.eventPlanDao().getEvent(actualEventId)
                 database.conversationLogDao().insert(ConversationLog(
-                    timestamp = LocalDateTime.now(),
+                    timestamp = LocalDateTime.now(ZoneId.systemDefault()),
                     role = "user",
                     content = "Acción: MARCAR COMO HECHO para el evento '${event?.title ?: "sin título"}'.",
                     eventId = actualEventId
@@ -88,7 +88,7 @@ class NotificationActionHandler @Inject constructor(
                 updateNotificationLog(notificationId, UserAction.DISMISSED, notification?.let { calculateResponseTime(it.scheduledTime) } ?: 0)
                 eventBus.emit(ChapelotasEvent.NotificationDismissed(notificationId, actualEventId, wasEffective))
 
-                database.eventPlanDao().incrementNotificationCount(actualEventId, LocalDateTime.now())
+                database.eventPlanDao().incrementNotificationCount(actualEventId, LocalDateTime.now(ZoneId.systemDefault()))
                 Log.d(TAG, "✅ Notificación $notificationId resuelta por el usuario.")
             } catch (e: Exception) {
                 Log.e(TAG, "💥 Error en dismiss", e)
@@ -105,7 +105,7 @@ class NotificationActionHandler @Inject constructor(
 
                 val event = database.eventPlanDao().getEvent(actualEventId)
                 database.conversationLogDao().insert(ConversationLog(
-                    timestamp = LocalDateTime.now(),
+                    timestamp = LocalDateTime.now(ZoneId.systemDefault()),
                     role = "user",
                     content = "Acción: ABRIR/VER DETALLE para el evento '${event?.title ?: "sin título"}'.",
                     eventId = actualEventId
@@ -126,7 +126,7 @@ class NotificationActionHandler @Inject constructor(
                 if (!notification.executed) {
                     val event = database.eventPlanDao().getEvent(notification.eventId)
                     database.conversationLogDao().insert(ConversationLog(
-                        timestamp = LocalDateTime.now(),
+                        timestamp = LocalDateTime.now(ZoneId.systemDefault()),
                         role = "user",
                         content = "Acción: IGNORAR (timeout) para el evento '${event?.title ?: "sin título"}'.",
                         eventId = notification.eventId
@@ -152,6 +152,6 @@ class NotificationActionHandler @Inject constructor(
     }
 
     private fun calculateResponseTime(scheduledTime: LocalDateTime): Long {
-        return ChronoUnit.SECONDS.between(scheduledTime, LocalDateTime.now()).coerceAtLeast(0)
+        return ChronoUnit.SECONDS.between(scheduledTime, LocalDateTime.now(ZoneId.systemDefault())).coerceAtLeast(0)
     }
 }

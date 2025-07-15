@@ -13,6 +13,7 @@ import kotlinx.coroutines.withContext
 import java.time.Duration
 import java.time.LocalDate
 import java.time.LocalDateTime
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -68,7 +69,7 @@ class ProcessAIPlansUseCase @Inject constructor(
                             // Usamos el método update completo para no marcar userModified
                             val updatedPlan = existingPlan.copy(
                                 isCritical = aiPlan.isCritical,
-                                updatedAt = LocalDateTime.now()
+                                updatedAt = LocalDateTime.now(ZoneId.systemDefault())
                             )
                             database.eventPlanDao().update(updatedPlan)
                         }
@@ -127,7 +128,7 @@ class ProcessAIPlansUseCase @Inject constructor(
             event2Title = conflictingEvent.title,
             event2Time = conflictingEvent.startTime.format(timeFormatter),
             type = conflictType,
-            date = LocalDateTime.now(),
+            date = LocalDateTime.now(ZoneId.systemDefault()),
             overlapMinutes = if (conflictType == ConflictType.OVERLAPPING) {
                 calculateOverlapMinutes(eventPlan, conflictingEvent)
             } else null,
@@ -138,7 +139,7 @@ class ProcessAIPlansUseCase @Inject constructor(
             severity = determineSeverity(eventPlan, conflictingEvent, conflictType),
             resolved = false,
             userNotified = false,
-            detectedAt = LocalDateTime.now()
+            detectedAt = LocalDateTime.now(ZoneId.systemDefault())
         )
 
         try {
@@ -146,11 +147,11 @@ class ProcessAIPlansUseCase @Inject constructor(
 
             // Marcar ambos eventos como en conflicto
             database.eventPlanDao().update(
-                eventPlan.copy(hasConflict = true, updatedAt = LocalDateTime.now())
+                eventPlan.copy(hasConflict = true, updatedAt = LocalDateTime.now(ZoneId.systemDefault()))
             )
 
             database.eventPlanDao().update(
-                conflictingEvent.copy(hasConflict = true, updatedAt = LocalDateTime.now())
+                conflictingEvent.copy(hasConflict = true, updatedAt = LocalDateTime.now(ZoneId.systemDefault()))
             )
 
             Log.d(TAG, "Conflicto registrado: ${eventPlan.title} con ${conflictingEvent.title}")

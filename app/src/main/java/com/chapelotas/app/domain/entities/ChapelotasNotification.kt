@@ -1,6 +1,7 @@
 package com.chapelotas.app.domain.entities
 
 import java.time.LocalDateTime
+import java.time.ZoneId
 
 /**
  * Representa una notificación programada por Chapelotas
@@ -14,14 +15,14 @@ data class ChapelotasNotification(
     val priority: NotificationPriority,
     val type: NotificationType,
     val hasBeenShown: Boolean = false,
-    val createdAt: LocalDateTime = LocalDateTime.now()
+    val createdAt: LocalDateTime = LocalDateTime.now(ZoneId.systemDefault())
 ) {
     fun shouldShowNow(): Boolean {
-        return !hasBeenShown && LocalDateTime.now().isAfter(scheduledTime)
+        return !hasBeenShown && LocalDateTime.now(ZoneId.systemDefault()).isAfter(scheduledTime)
     }
 
     fun minutesUntilShow(): Long {
-        return java.time.Duration.between(LocalDateTime.now(), scheduledTime).toMinutes()
+        return java.time.Duration.between(LocalDateTime.now(ZoneId.systemDefault()), scheduledTime).toMinutes()
     }
 }
 

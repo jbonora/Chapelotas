@@ -29,17 +29,17 @@ data class CalendarEvent(
         get() = java.time.Duration.between(startTime, endTime).toMinutes()
     
     fun isToday(): Boolean {
-        val today = LocalDateTime.now().toLocalDate()
+        val today = LocalDateTime.now(ZoneId.systemDefault()).toLocalDate()
         return startTime.toLocalDate() == today
     }
     
     fun isTomorrow(): Boolean {
-        val tomorrow = LocalDateTime.now().toLocalDate().plusDays(1)
+        val tomorrow = LocalDateTime.now(ZoneId.systemDefault()).toLocalDate().plusDays(1)
         return startTime.toLocalDate() == tomorrow
     }
     
     fun minutesUntilStart(): Long {
-        return java.time.Duration.between(LocalDateTime.now(), startTime).toMinutes()
+        return java.time.Duration.between(LocalDateTime.now(ZoneId.systemDefault()), startTime).toMinutes()
     }
     
     fun timeUntilStartDescription(): String {
@@ -69,14 +69,14 @@ data class ChapelotasNotification(
     val priority: NotificationPriority,
     val type: NotificationType,
     val hasBeenShown: Boolean = false,
-    val createdAt: LocalDateTime = LocalDateTime.now()
+    val createdAt: LocalDateTime = LocalDateTime.now(ZoneId.systemDefault())
 ) {
     fun shouldShowNow(): Boolean {
-        return !hasBeenShown && LocalDateTime.now().isAfter(scheduledTime)
+        return !hasBeenShown && LocalDateTime.now(ZoneId.systemDefault()).isAfter(scheduledTime)
     }
     
     fun minutesUntilShow(): Long {
-        return java.time.Duration.between(LocalDateTime.now(), scheduledTime).toMinutes()
+        return java.time.Duration.between(LocalDateTime.now(ZoneId.systemDefault()), scheduledTime).toMinutes()
     }
 }
 
@@ -303,7 +303,7 @@ class GetDailySummaryUseCase @Inject constructor(
     }
     
     private fun findNextEvent(events: List<CalendarEvent>): CalendarEvent? {
-        val now = java.time.LocalDateTime.now()
+        val now = java.time.LocalDateTime.now(ZoneId.systemDefault())
         return events.filter { it.startTime.isAfter(now) }.minByOrNull { it.startTime }
     }
 }

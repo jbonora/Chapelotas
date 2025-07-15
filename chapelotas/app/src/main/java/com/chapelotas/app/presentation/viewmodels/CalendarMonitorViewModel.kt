@@ -222,7 +222,7 @@ class CalendarMonitorViewModel @Inject constructor(
                 // Registrar en el log
                 database.conversationLogDao().insert(
                     ConversationLog(
-                        timestamp = LocalDateTime.now(),
+                        timestamp = LocalDateTime.now(ZoneId.systemDefault()),
                         role = "user",
                         content = "🔄 Reactivé el evento: ${event.title}",
                         eventId = eventId
@@ -239,7 +239,7 @@ class CalendarMonitorViewModel @Inject constructor(
 
                 database.conversationLogDao().insert(
                     ConversationLog(
-                        timestamp = LocalDateTime.now().plusSeconds(1),
+                        timestamp = LocalDateTime.now(ZoneId.systemDefault()).plusSeconds(1),
                         role = "assistant",
                         content = response
                     )

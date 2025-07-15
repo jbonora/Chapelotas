@@ -5,13 +5,12 @@ import android.app.AlertDialog as AndroidAlertDialog
 import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
-import com.chapelotas.app.domain.events.ChapelotasEvent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
-import android.util.Log // ---> IMPORT AÑADIDO <---
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -21,9 +20,11 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -32,6 +33,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
@@ -39,17 +41,22 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.chapelotas.app.domain.entities.ChapelotasNotification
+import com.chapelotas.app.domain.events.ChapelotasEvent
+import com.chapelotas.app.presentation.ui.ChatListScreen
 import com.chapelotas.app.presentation.ui.PlanScreen
 import com.chapelotas.app.presentation.ui.SettingsScreen
 import com.chapelotas.app.presentation.ui.TodayScreen
 import com.chapelotas.app.presentation.viewmodels.CalendarMonitorViewModel
+import com.chapelotas.app.presentation.viewmodels.ChatListViewModel
 import com.chapelotas.app.presentation.viewmodels.MainViewModel
 import com.chapelotas.app.ui.theme.ChapelotasTheme
 import dagger.hilt.android.AndroidEntryPoint
-import androidx.compose.runtime.LaunchedEffect
+import com.chapelotas.app.presentation.ui.ChatDetailScreen
+import com.chapelotas.app.presentation.viewmodels.ChatDetailViewModel
 
 sealed class Screen(val route: String, val icon: ImageVector, val label: String) {
     object Today : Screen("today", Icons.Default.Email, "Hoy")
+    object Chat : Screen("chat", Icons.Default.Send, "Chats")
     object Plan : Screen("plan", Icons.Default.DateRange, "Plan del Día")
     object Settings : Screen("settings", Icons.Default.Settings, "Ajustes")
 }
@@ -81,6 +88,7 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
     private val calendarPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { isGranted ->
@@ -198,7 +206,7 @@ fun MainAppScaffold(
     viewModel: MainViewModel,
     calendarMonitorViewModel: CalendarMonitorViewModel
 ) {
-    val navItems = listOf(Screen.Today, Screen.Plan, Screen.Settings)
+    val navItems = listOf(Screen.Today, Screen.Chat, Screen.Plan, Screen.Settings)
     LaunchedEffect(Unit) {
         viewModel.navigationEvents.collect { event ->
             when (event) {
@@ -237,21 +245,41 @@ fun MainAppScaffold(
         NavHost(
             navController = navController,
             startDestination = startRoute,
-            modifier = Modifier.padding(innerPadding)  // ← Usar innerPadding, no padding
+            modifier = Modifier.padding(innerPadding)
         ) {
             composable(Screen.Today.route) {
-                TodayScreen(viewModel = viewModel)  // ← Usar viewModel, no mainViewModel
+                TodayScreen(viewModel = viewModel)
             }
+
+            composable(Screen.Chat.route) {
+                val chatListViewModel = hiltViewModel<ChatListViewModel>()
+                ChatListScreen(
+                    viewModel = chatListViewModel,
+                    onThreadClick = { threadId ->
+                        navController.navigate("chat_detail/$threadId")
+                    }
+                )
+            }
+
             composable(Screen.Plan.route) {
                 PlanScreen(
-                    mainViewModel = viewModel,  // ← Usar viewModel
+                    mainViewModel = viewModel,
                     calendarMonitorViewModel = calendarMonitorViewModel
                 )
             }
+
             composable(Screen.Settings.route) {
                 SettingsScreen(
-                    mainViewModel = viewModel,  // ← Usar viewModel
+                    mainViewModel = viewModel,
                     calendarViewModel = calendarMonitorViewModel
+                )
+            }
+
+            composable("chat_detail/{threadId}") { backStackEntry ->
+                val chatDetailViewModel = hiltViewModel<ChatDetailViewModel>()
+                ChatDetailScreen(
+                    viewModel = chatDetailViewModel,
+                    onBackClick = { navController.popBackStack() }
                 )
             }
         }

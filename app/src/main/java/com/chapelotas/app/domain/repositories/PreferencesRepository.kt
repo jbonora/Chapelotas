@@ -74,4 +74,36 @@ interface PreferencesRepository {
      * Verifica si es la primera vez que se ejecuta la app
      */
     suspend fun isFirstTimeUser(): Boolean
+
+    // AGREGAR estos métodos a la interfaz PreferencesRepository:
+
+    /**
+     * Guarda el timestamp de la última ejecución exitosa
+     */
+    suspend fun setLastSuccessfulRun(timestamp: Long)
+
+    /**
+     * Obtiene el timestamp de la última ejecución exitosa
+     */
+    suspend fun getLastSuccessfulRun(): Long?
+
+    /**
+     * Marca que el día actual ya fue inicializado
+     */
+    suspend fun setTodayInitialized(date: String)
+
+    /**
+     * Verifica si el día ya fue inicializado
+     */
+    suspend fun isTodayInitialized(date: String): Boolean
+
+    /**
+     * Guarda que las alarmas están configuradas
+     */
+    suspend fun setAlarmsConfigured(configured: Boolean)
+
+    /**
+     * Verifica si las alarmas están configuradas
+     */
+    suspend fun areAlarmsConfigured(): Boolean
 }

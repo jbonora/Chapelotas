@@ -7,7 +7,7 @@ import java.time.LocalDateTime
  * JSON Maestro que el mono entiende
  */
 data class MasterPlan(
-    val version: String = LocalDateTime.now().toString(),
+    val version: String = LocalDateTime.now(ZoneId.systemDefault()).toString(),
     val usuario: String = "",
     @SerializedName("modo_sarcastico")
     val modoSarcastico: Boolean = false,

@@ -46,7 +46,7 @@ class InitializeChatThreadsUseCase @Inject constructor(
                         eventTime = event.startTime,
                         status = when {
                             event.resolutionStatus.name == "COMPLETED" -> "COMPLETED"
-                            event.startTime.isBefore(java.time.LocalDateTime.now()) -> "MISSED"
+                            event.startTime.isBefore(java.time.LocalDateTime.now(ZoneId.systemDefault())) -> "MISSED"
                             else -> "ACTIVE"
                         }
                     )

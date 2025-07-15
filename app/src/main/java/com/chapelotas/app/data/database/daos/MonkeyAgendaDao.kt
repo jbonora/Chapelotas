@@ -4,6 +4,7 @@ import androidx.room.*
 import com.chapelotas.app.data.database.entities.MonkeyAgenda
 import kotlinx.coroutines.flow.Flow
 import java.time.LocalDateTime
+import java.time.ZoneId
 
 @Dao
 interface MonkeyAgendaDao {
@@ -24,7 +25,7 @@ interface MonkeyAgendaDao {
     suspend fun markAsProcessing(id: Long)
 
     @Query("UPDATE monkey_agenda SET status = 'COMPLETED', processedAt = :processedAt WHERE id = :id")
-    suspend fun markAsCompleted(id: Long, processedAt: LocalDateTime = LocalDateTime.now())
+    suspend fun markAsCompleted(id: Long, processedAt: LocalDateTime = LocalDateTime.now(ZoneId.systemDefault()))
 
     @Query("UPDATE monkey_agenda SET status = 'CANCELLED' WHERE id = :id")
     suspend fun markAsCancelled(id: Long)

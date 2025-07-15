@@ -61,7 +61,7 @@ class GetDailySummaryUseCase @Inject constructor(
      * Encuentra el próximo evento del día
      */
     private fun findNextEvent(events: List<CalendarEvent>): CalendarEvent? {
-        val now = java.time.LocalDateTime.now()
+        val now = java.time.LocalDateTime.now(ZoneId.systemDefault())
         return events
             .filter { it.startTime.isAfter(now) }
             .minByOrNull { it.startTime }

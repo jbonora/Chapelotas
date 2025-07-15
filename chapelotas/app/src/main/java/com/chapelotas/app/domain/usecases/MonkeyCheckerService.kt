@@ -223,7 +223,7 @@ class MonkeyCheckerService @Inject constructor(
         val notification = ChapelotasNotification(
             id = System.currentTimeMillis().toString(),
             eventId = 0L,
-            scheduledTime = LocalDateTime.now(),
+            scheduledTime = LocalDateTime.now(ZoneId.systemDefault()),
             message = mensaje,
             priority = NotificationPriority.NORMAL,
             type = NotificationType.EVENT_REMINDER
@@ -236,7 +236,7 @@ class MonkeyCheckerService @Inject constructor(
         val notification = ChapelotasNotification(
             id = System.currentTimeMillis().toString(),
             eventId = 0L,
-            scheduledTime = LocalDateTime.now(),
+            scheduledTime = LocalDateTime.now(ZoneId.systemDefault()),
             message = mensaje,
             priority = NotificationPriority.CRITICAL,
             type = NotificationType.CRITICAL_ALERT

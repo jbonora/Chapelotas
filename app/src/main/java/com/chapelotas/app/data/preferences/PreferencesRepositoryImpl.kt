@@ -34,6 +34,9 @@ class PreferencesRepositoryImpl @Inject constructor(
         val CRITICAL_ALERT_SOUND = stringPreferencesKey("critical_alert_sound")
         val NOTIFICATION_SOUND = stringPreferencesKey("notification_sound")
         val REMINDER_MINUTES_BEFORE = intPreferencesKey("reminder_minutes_before")
+        val LAST_SUCCESSFUL_RUN = longPreferencesKey("last_successful_run")
+        val TODAY_INITIALIZED = stringPreferencesKey("today_initialized")
+        val ALARMS_CONFIGURED = booleanPreferencesKey("alarms_configured")
     }
 
     override suspend fun getUserPreferences(): UserPreferences {
@@ -183,6 +186,50 @@ class PreferencesRepositoryImpl @Inject constructor(
                 preferences[PreferenceKeys.IS_FIRST_TIME_USER] ?: true
             }
             .catch { true }
+            .first()
+    }
+    override suspend fun setLastSuccessfulRun(timestamp: Long) {
+        context.dataStore.edit { preferences ->
+            preferences[PreferenceKeys.LAST_SUCCESSFUL_RUN] = timestamp
+        }
+    }
+
+    override suspend fun getLastSuccessfulRun(): Long? {
+        return context.dataStore.data
+            .map { preferences ->
+                preferences[PreferenceKeys.LAST_SUCCESSFUL_RUN]
+            }
+            .catch { null }
+            .first()
+    }
+
+    override suspend fun setTodayInitialized(date: String) {
+        context.dataStore.edit { preferences ->
+            preferences[PreferenceKeys.TODAY_INITIALIZED] = date
+        }
+    }
+
+    override suspend fun isTodayInitialized(date: String): Boolean {
+        return context.dataStore.data
+            .map { preferences ->
+                preferences[PreferenceKeys.TODAY_INITIALIZED] == date
+            }
+            .catch { false }
+            .first()
+    }
+
+    override suspend fun setAlarmsConfigured(configured: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[PreferenceKeys.ALARMS_CONFIGURED] = configured
+        }
+    }
+
+    override suspend fun areAlarmsConfigured(): Boolean {
+        return context.dataStore.data
+            .map { preferences ->
+                preferences[PreferenceKeys.ALARMS_CONFIGURED] ?: false
+            }
+            .catch { false }
             .first()
     }
 }

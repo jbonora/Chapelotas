@@ -33,7 +33,7 @@ class MonkeyAgendaService @Inject constructor(
      * Procesa la siguiente acción pendiente
      */
     suspend fun processNextAction() {
-        val now = LocalDateTime.now()
+        val now = LocalDateTime.now(ZoneId.systemDefault())
 
         // Obtener todas las acciones pendientes que ya deberían ejecutarse
         val pendingActions = database.monkeyAgendaDao().getPendingActionsUntilNow(now)
@@ -124,7 +124,7 @@ class MonkeyAgendaService @Inject constructor(
 
         // Generar mensaje con AI
         val dayPlan = database.dayPlanDao().getTodayPlan()
-        val minutesUntil = java.time.Duration.between(LocalDateTime.now(), event.startTime).toMinutes()
+        val minutesUntil = java.time.Duration.between(LocalDateTime.now(ZoneId.systemDefault()), event.startTime).toMinutes()
 
         val prompt = """
         Sos Chapelotas, secretaria ${if (dayPlan?.sarcasticMode == true) "sarcástica argentina" else "profesional"}.
@@ -143,7 +143,7 @@ class MonkeyAgendaService @Inject constructor(
         // Guardar mensaje en el chat
         database.conversationLogDao().insert(
             ConversationLog(
-                timestamp = LocalDateTime.now(),
+                timestamp = LocalDateTime.now(ZoneId.systemDefault()),
                 role = "assistant",
                 content = message,
                 eventId = eventId,
@@ -152,7 +152,7 @@ class MonkeyAgendaService @Inject constructor(
         )
 
         // Actualizar thread
-        database.chatThreadDao().updateLastMessage(threadId, message, LocalDateTime.now())
+        database.chatThreadDao().updateLastMessage(threadId, message, LocalDateTime.now(ZoneId.systemDefault()))
 
         // Mostrar notificación
         val notification = com.chapelotas.app.domain.entities.ChapelotasNotification(
@@ -198,7 +198,7 @@ class MonkeyAgendaService @Inject constructor(
         // Guardar en thread general
         database.conversationLogDao().insert(
             ConversationLog(
-                timestamp = LocalDateTime.now(),
+                timestamp = LocalDateTime.now(ZoneId.systemDefault()),
                 role = "assistant",
                 content = message,
                 threadId = "general"
@@ -212,7 +212,7 @@ class MonkeyAgendaService @Inject constructor(
         val notification = com.chapelotas.app.domain.entities.ChapelotasNotification(
             id = "summary_${System.currentTimeMillis()}",
             eventId = 0L,
-            scheduledTime = LocalDateTime.now(),
+            scheduledTime = LocalDateTime.now(ZoneId.systemDefault()),
             message = message,
             priority = com.chapelotas.app.domain.entities.NotificationPriority.NORMAL,
             type = com.chapelotas.app.domain.entities.NotificationType.DAILY_SUMMARY
@@ -242,7 +242,7 @@ class MonkeyAgendaService @Inject constructor(
      */
     private suspend fun processCleanup(action: MonkeyAgenda) {
         // Archivar threads completados viejos
-        val cutoffDate = LocalDateTime.now().minusDays(7)
+        val cutoffDate = LocalDateTime.now(ZoneId.systemDefault()).minusDays(7)
         database.chatThreadDao().archiveOldCompleted(cutoffDate)
 
         // Limpiar agenda vieja

@@ -13,6 +13,7 @@ import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import java.time.LocalDateTime
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.UUID
 import java.util.concurrent.TimeUnit
@@ -73,6 +74,8 @@ class AIRepositoryImpl @Inject constructor() : AIRepository {
         2. Crítico: Marca `isCritical: true` si el título contiene "Examen", "Vuelo", "Jefe", "Final", "Entrevista", "Médico".
         3. Conflictos: Si dos eventos se superponen, marca `hasConflict: true` y `conflictType: "OVERLAP"`. Si hay menos de 15 min entre ellos, marca `hasConflict: true` y `conflictType: "TOO_CLOSE"`. Si no hay conflicto, `hasConflict` debe ser `false`.
         4. Notificaciones: Eventos críticos deben tener dos notificaciones `CRITICAL_ALERT`. Eventos con `location` deben tener un `PREPARATION_TIP`. Eventos normales, un `EVENT_REMINDER`.
+        ### IMPORTANTE ###
+        Todas las fechas y horas están en la zona horaria del usuario. Respeta exactamente las fechas/horas proporcionadas sin hacer conversiones.
         """.trimIndent()
 
         val eventsAsJson = gson.toJson(events.map { it.toDataForAI() })
@@ -123,9 +126,10 @@ class AIRepositoryImpl @Inject constructor() : AIRepository {
         "eventId" to this.id,
         "title" to this.title,
         "description" to this.description,
-        "startTime" to this.startTime.toString(),
-        "endTime" to this.endTime.toString(),
-        "location" to this.location
+        "startTime" to this.startTime.atZone(ZoneId.systemDefault()).toString(), // Con zona horaria
+        "endTime" to this.endTime.atZone(ZoneId.systemDefault()).toString(),     // Con zona horaria
+        "location" to this.location,
+        "timezone" to ZoneId.systemDefault().toString() // Agregar timezone explícito
     )
 
     @Deprecated("Usar createDailyPlanBatch para un análisis contextual completo.")
@@ -163,7 +167,8 @@ class AIRepositoryImpl @Inject constructor() : AIRepository {
         3. REGLA DE ORO (NO INVENTAR): Está terminantemente prohibido inventar o sugerir actividades que no estén en la lista de DATOS. Cíñete exclusivamente a la información del calendario que te entrego.
         4. MANEJO DE DÍA VACÍO: Si en la sección de DATOS te entrego "Ninguna" tarea, tienes PROHIBIDO mencionar la palabra "tareas" o "actividades". En su lugar, simplemente desea un buen día o una buena noche de forma cordial.
         ### DATOS ###
-        Hora Actual: ${LocalDateTime.now().format(DateTimeFormatter.ofPattern("HH:mm"))}
+        Fecha y Hora Actual: ${LocalDateTime.now(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))}
+        Zona Horaria: ${ZoneId.systemDefault()}
         Tareas Pendientes:
         - ${eventsText}
         """.trimIndent()
@@ -182,7 +187,8 @@ class AIRepositoryImpl @Inject constructor() : AIRepository {
         3. REGLA DE ORO (NO INVENTAR): Está terminantemente prohibido inventar o sugerir actividades que no estén en la lista de DATOS. Cíñete exclusivamente a la información del calendario que te entrego.
         4. MANEJO DE DÍA VACÍO: Si en la sección de DATOS te entrego "Ninguna" tarea, tienes PROHIBIDO mencionar la palabra "tareas" o "actividades". En su lugar, haz un comentario ingenioso sobre la falta de actividad (la "vagancia").
         ### DATOS ###
-        Hora Actual: ${LocalDateTime.now().format(DateTimeFormatter.ofPattern("HH:mm"))}
+        Fecha y Hora Actual: ${LocalDateTime.now(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))}
+        Zona Horaria: ${ZoneId.systemDefault()}
         Tareas Pendientes:
         - ${eventsText}
         """.trimIndent()
@@ -193,7 +199,7 @@ class AIRepositoryImpl @Inject constructor() : AIRepository {
     override suspend fun generateTomorrowSummary(tomorrowEvents: List<CalendarEvent>, todayContext: String?, isSarcastic: Boolean): String = generateSimulatedTomorrowSummary(tomorrowEvents, isSarcastic)
     override suspend fun callOpenAIForText(prompt: String, temperature: Double): String = try { openAIApi.createChatCompletion(authorization = "Bearer $apiKey", request = ChatCompletionRequest(messages = listOf(Message("user", prompt)), temperature = temperature)).choices.firstOrNull()?.message?.content?.trim() ?: "No pude generar una respuesta." } catch (e: Exception) { "Error de conexión con la IA de Chapelotas." }
     private fun generateSimulatedEventPlan(event: CalendarEvent): List<PlannedNotification> = if (listOf("examen", "vuelo", "médico", "entrevista", "jefe", "final").any { event.title.contains(it, ignoreCase = true) }) { listOf(PlannedNotification(event.id, event.startTime.minusMinutes(15), "¡ATENCIÓN! Evento crítico '${event.title}' en 15 minutos.", com.chapelotas.app.domain.entities.NotificationPriority.CRITICAL, com.chapelotas.app.domain.entities.NotificationType.EVENT_REMINDER, null, false)) } else { listOf(PlannedNotification(event.id, event.startTime.minusMinutes(15), "Recordatorio: ${event.title} en 15 minutos.", com.chapelotas.app.domain.entities.NotificationPriority.NORMAL, com.chapelotas.app.domain.entities.NotificationType.EVENT_REMINDER, null, false)) }
-    private fun generateSimulatedPlan(events: List<CalendarEvent>): AIPlan = AIPlan(UUID.randomUUID().toString(), LocalDateTime.now(), events.map { it.id }, events.map { PlannedNotification(it.id, it.startTime.minusMinutes(15), "Recordatorio: ${it.title}", com.chapelotas.app.domain.entities.NotificationPriority.NORMAL, com.chapelotas.app.domain.entities.NotificationType.EVENT_REMINDER, null, false) }, "Modo simulado activado", "Revisar eventos.")
+    private fun generateSimulatedPlan(events: List<CalendarEvent>): AIPlan = AIPlan(UUID.randomUUID().toString(), LocalDateTime.now(ZoneId.systemDefault()), events.map { it.id }, events.map { PlannedNotification(it.id, it.startTime.minusMinutes(15), "Recordatorio: ${it.title}", com.chapelotas.app.domain.entities.NotificationPriority.NORMAL, com.chapelotas.app.domain.entities.NotificationType.EVENT_REMINDER, null, false) }, "Modo simulado activado", "Revisar eventos.")
     private fun generateSimulatedMessage(event: CalendarEvent, messageType: String, isSarcastic: Boolean): String = if (isSarcastic) "Che, ${event.title} en ${event.timeUntilStartDescription()}." else "Recordatorio: ${event.title} en ${event.timeUntilStartDescription()}."
     private fun generateSimulatedDailySummary(events: List<CalendarEvent>, isSarcastic: Boolean): String = if (isSarcastic) { if (events.isEmpty()) "Hoy te la pasás mirando el techo, parece. Cero eventos." else "Hoy tenés ${events.size} cosas. A ver si las hacés." } else { if (events.isEmpty()) "No tienes eventos para hoy. ¡Disfruta tu día!" else "Hoy tienes ${events.size} eventos programados." }
     private fun generateSimulatedTomorrowSummary(events: List<CalendarEvent>, isSarcastic: Boolean): String = if (isSarcastic) { if (events.isEmpty()) "Mañana pinta para la reposera. Nada en la agenda." else "Mañana hay ${events.size} eventos. Andá preparándote." } else { if (events.isEmpty()) "No tienes eventos para mañana." else "Mañana tienes ${events.size} eventos programados." }

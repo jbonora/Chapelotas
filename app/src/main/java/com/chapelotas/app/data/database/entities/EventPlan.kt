@@ -8,6 +8,7 @@ import androidx.room.PrimaryKey
 import java.time.Duration
 import java.time.LocalDate
 import java.time.LocalDateTime
+import java.time.ZoneId
 
 @Entity(
     tableName = "event_plans",
@@ -48,8 +49,8 @@ data class EventPlan(
 
     val notificationsSent: Int = 0,
     val lastNotificationTime: LocalDateTime? = null,
-    val createdAt: LocalDateTime = LocalDateTime.now(),
-    var updatedAt: LocalDateTime? = LocalDateTime.now()
+    val createdAt: LocalDateTime = LocalDateTime.now(ZoneId.systemDefault()),
+    var updatedAt: LocalDateTime? = LocalDateTime.now(ZoneId.systemDefault())
 ) {
     val durationInMinutes: Long
         get() = Duration.between(startTime, endTime).toMinutes()
