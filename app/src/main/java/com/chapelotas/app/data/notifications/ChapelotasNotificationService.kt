@@ -6,124 +6,137 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
-import android.os.PowerManager
-import android.util.Log
+import android.os.SystemClock
 import androidx.core.app.NotificationCompat
 import com.chapelotas.app.R
-import com.chapelotas.app.domain.events.ChapelotasEvent
-import com.chapelotas.app.domain.events.ChapelotasEventBus
-import com.chapelotas.app.domain.usecases.UnifiedMonkeyService
+import com.chapelotas.app.domain.debug.DebugLog
+import com.chapelotas.app.domain.usecases.CalendarSyncUseCase
+import com.chapelotas.app.domain.usecases.ReminderEngine
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
 import javax.inject.Inject
 
-/**
- * Servicio ultra-persistente estilo WhatsApp
- * ACTUALIZADO para trabajar con la arquitectura de AlarmManager
- */
 @AndroidEntryPoint
 class ChapelotasNotificationService : Service() {
 
     @Inject
-    lateinit var unifiedMonkey: UnifiedMonkeyService
-
+    lateinit var reminderEngine: ReminderEngine
     @Inject
-    lateinit var eventBus: ChapelotasEventBus
+    lateinit var calendarSyncUseCase: CalendarSyncUseCase
+    @Inject
+    lateinit var debugLog: DebugLog
 
-    private val serviceScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
-    private var wakeLock: PowerManager.WakeLock? = null
-    private var isServiceStarted = false
+    private var serviceJob = SupervisorJob()
+    private var serviceScope = CoroutineScope(Dispatchers.Default + serviceJob)
 
     override fun onCreate() {
         super.onCreate()
-        Log.d("ChapelotasService", "🚀 Servicio creado - Edición Bello Durmiente")
-
-        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
-        wakeLock = powerManager.newWakeLock(
-            PowerManager.PARTIAL_WAKE_LOCK,
-            "Chapelotas::MonkeyWakeLock"
-        ).apply {
-            acquire(10*60*1000L)
-        }
-        eventBus.tryEmit(ChapelotasEvent.ServiceStarted("ChapelotasNotificationService"))
+        debugLog.add("✅ SERVICIO: onCreate - El servicio se está creando.")
+        scheduleHeartbeatAlarm()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        Log.d("ChapelotasService", "📍 onStartCommand llamado")
+        debugLog.add("🚀 SERVICIO: onStartCommand - El servicio ha arrancado.")
+        startForegroundService()
 
-        if (!isServiceStarted) {
-            isServiceStarted = true
-            startForegroundService()
-            // --- CAMBIO CLAVE: Ya no llamamos a startMonkey() ---
-            // En su lugar, nos aseguramos de que la próxima alarma esté programada.
-            // Esto es crucial por si el servicio se reinicia y no hay alarmas pendientes.
-            serviceScope.launch {
-                unifiedMonkey.scheduleNextAlarm()
-            }
-            scheduleRestartAlarm()
+        if (serviceJob.isCancelled) {
+            serviceJob = SupervisorJob()
+            serviceScope = CoroutineScope(Dispatchers.Default + serviceJob)
         }
+
+        debugLog.add("🏁 SERVICIO: Iniciando bucles de trabajo.")
+        startReminderLoop()
+        startCalendarMonitoring()
+
         return START_STICKY
     }
 
-    override fun onBind(intent: Intent?): IBinder? = null
-
     override fun onDestroy() {
-        Log.w("ChapelotasService", "⚠️ Servicio destruido - Programando reinicio...")
-        eventBus.tryEmit(ChapelotasEvent.ServiceStopped(
-            serviceName = "ChapelotasNotificationService",
-            reason = "Android killed service"
-        ))
-        wakeLock?.release()
-        serviceScope.cancel()
-        isServiceStarted = false
-        scheduleRestartAlarm(delayMillis = 1000)
-
-        // --- CAMBIO CLAVE: Hacemos el intent explícito ---
-        val restartIntent = Intent(this, RestartServiceReceiver::class.java)
-        sendBroadcast(restartIntent)
-
+        debugLog.add("💀 SERVICIO: onDestroy - ¡El sistema está matando el servicio!")
+        serviceJob.cancel()
+        // Se mantiene la lógica de resurrección inmediata.
+        val broadcastIntent = Intent(this, RestartServiceReceiver::class.java)
+        sendBroadcast(broadcastIntent)
         super.onDestroy()
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
-        Log.w("ChapelotasService", "📱 App removida de recientes - Manteniéndome vivo...")
-        val restartServiceIntent = Intent(applicationContext, ChapelotasNotificationService::class.java).apply {
+        debugLog.add("👋 SERVICIO: onTaskRemoved - El usuario cerró la app. Dejando ancla para revivir.")
+        val restartServiceIntent = Intent(applicationContext, this::class.java).apply {
             setPackage(packageName)
         }
         val restartServicePendingIntent = PendingIntent.getService(
-            applicationContext, 1, restartServiceIntent,
+            this,
+            1,
+            restartServiceIntent,
             PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_IMMUTABLE
         )
         val alarmService = applicationContext.getSystemService(Context.ALARM_SERVICE) as AlarmManager
         alarmService.set(
             AlarmManager.ELAPSED_REALTIME,
-            android.os.SystemClock.elapsedRealtime() + 1000,
+            SystemClock.elapsedRealtime() + 2000,
             restartServicePendingIntent
         )
         super.onTaskRemoved(rootIntent)
     }
 
+    private fun scheduleHeartbeatAlarm() {
+        val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        val intent = Intent(this, HeartbeatReceiver::class.java)
+        val pendingIntent = PendingIntent.getBroadcast(
+            this,
+            HEARTBEAT_REQUEST_CODE,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        alarmManager.setInexactRepeating(
+            AlarmManager.RTC_WAKEUP,
+            System.currentTimeMillis() + HEARTBEAT_INTERVAL,
+            HEARTBEAT_INTERVAL,
+            pendingIntent
+        )
+        debugLog.add("❤️ HEARTBEAT: Alarma programada para ejecutarse cada 1 hora.")
+    }
+
+    private fun startReminderLoop() {
+        debugLog.add("⚙️ BUCLE-RECORDATORIOS: Iniciando ciclo del ReminderEngine.")
+        serviceScope.launch {
+            while (isActive) {
+                try {
+                    debugLog.add("⏰ BUCLE-RECORDATORIOS: Verificando tareas...")
+                    reminderEngine.checkAndSendReminders()
+                } catch (e: Exception) {
+                    debugLog.add("❌ BUCLE-RECORDATORIOS: Error - ${e.message}")
+                }
+                delay(60 * 1000)
+            }
+        }
+    }
+
+    private fun startCalendarMonitoring() {
+        debugLog.add("👁️ BUCLE-CALENDARIO: Activando monitoreo en tiempo real.")
+        serviceScope.launch {
+            try {
+                calendarSyncUseCase.startMonitoring()
+            } catch (e: Exception) {
+                debugLog.add("❌ BUCLE-CALENDARIO: Error - ${e.message}")
+            }
+        }
+    }
+
+    override fun onBind(intent: Intent?): IBinder? = null
+
     private fun startForegroundService() {
         createInvisibleChannel()
         val notification = NotificationCompat.Builder(this, INVISIBLE_CHANNEL_ID)
-            .setContentTitle("")
-            .setContentText("")
+            .setContentTitle("Chapelotas está vigilando")
+            .setContentText("El servicio está activo para no perderse nada.")
             .setSmallIcon(R.drawable.ic_notification)
             .setPriority(NotificationCompat.PRIORITY_MIN)
-            .setVisibility(NotificationCompat.VISIBILITY_SECRET)
             .setOngoing(true)
             .build()
         startForeground(FOREGROUND_SERVICE_ID, notification)
-
-        serviceScope.launch {
-            while (isActive) {
-                delay(5 * 60 * 1000)
-                wakeLock?.let {
-                    if (it.isHeld) it.release()
-                    it.acquire(10*60*1000L)
-                }
-            }
-        }
     }
 
     private fun createInvisibleChannel() {
@@ -131,51 +144,34 @@ class ChapelotasNotificationService : Service() {
             val channel = NotificationChannel(
                 INVISIBLE_CHANNEL_ID,
                 "Servicio Chapelotas",
-                NotificationManager.IMPORTANCE_NONE
+                NotificationManager.IMPORTANCE_MIN
             ).apply {
-                description = "Mantiene Chapelotas activo"
+                description = "Mantiene Chapelotas activo en segundo plano."
                 setShowBadge(false)
-                lockscreenVisibility = Notification.VISIBILITY_SECRET
             }
             val notificationManager = getSystemService(NotificationManager::class.java)
             notificationManager.createNotificationChannel(channel)
         }
     }
 
-    private fun scheduleRestartAlarm(delayMillis: Long = 60000) {
-        val intent = Intent(this, RestartServiceReceiver::class.java)
-        val pendingIntent = PendingIntent.getBroadcast(
-            this,
-            SERVICE_RESTART_CODE,
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-        val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            alarmManager.setExactAndAllowWhileIdle(
-                AlarmManager.RTC_WAKEUP,
-                System.currentTimeMillis() + delayMillis,
-                pendingIntent
-            )
-        } else {
-            alarmManager.setExact(
-                AlarmManager.RTC_WAKEUP,
-                System.currentTimeMillis() + delayMillis,
-                pendingIntent
-            )
-        }
-    }
-
     companion object {
-        private const val INVISIBLE_CHANNEL_ID = "chapelotas_invisible"
+        private const val INVISIBLE_CHANNEL_ID = "chapelotas_service_channel"
         private const val FOREGROUND_SERVICE_ID = 1337
-        private const val SERVICE_RESTART_CODE = 1984
+        private const val HEARTBEAT_REQUEST_CODE = 999
+        // --- INICIO DE LA MODIFICACIÓN ---
+        private const val HEARTBEAT_INTERVAL = 60 * 60 * 1000L // 1 hora
+        // --- FIN DE LA MODIFICACIÓN ---
     }
 }
 
+/**
+ * Este receiver es la última línea de defensa. Es llamado por onDestroy
+ * para intentar reiniciar el servicio inmediatamente.
+ */
 class RestartServiceReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context?, intent: Intent?) {
-        Log.d("RestartReceiver", "🔄 Reiniciando servicio...")
+        val debugLog = DebugLog
+        debugLog.add("🔄 RESTART-RECEIVER: Recibida señal para reiniciar el servicio.")
         context?.let { ctx ->
             val serviceIntent = Intent(ctx, ChapelotasNotificationService::class.java)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

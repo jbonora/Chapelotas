@@ -2,69 +2,51 @@ package com.chapelotas.app.domain.entities
 
 import java.time.LocalDateTime
 import java.time.ZoneId
+import java.time.ZonedDateTime
 
 /**
- * Representa un evento del calendario
- * Esta es la entidad principal que maneja Chapelotas
+ * Evento del calendario con soporte completo de zonas horarias
  */
 data class CalendarEvent(
     val id: Long,
     val title: String,
-    val description: String?,
     val startTime: LocalDateTime,
     val endTime: LocalDateTime,
-    val location: String?,
-    val isAllDay: Boolean = false,
+    val timeZone: ZoneId = ZoneId.systemDefault(), // Zona horaria del evento
+    val location: String? = null,
+    val description: String? = null,
     val calendarId: Long,
     val calendarName: String,
-    val isCritical: Boolean = false,
-    val hasBeenSummarized: Boolean = false
+    val isAllDay: Boolean = false,
+    val isCritical: Boolean = false
 ) {
-    companion object {
-        // --- CAMBIO CLAVE: Método para crear un evento vacío para el chequeo proactivo ---
-        fun createEmpty(): CalendarEvent {
-            return CalendarEvent(
-                id = 0,
-                title = "Chequeo proactivo",
-                description = null,
-                startTime = LocalDateTime.now(ZoneId.systemDefault()),
-                endTime = LocalDateTime.now(ZoneId.systemDefault()),
-                location = null,
-                isAllDay = true,
-                calendarId = 0,
-                calendarName = "",
-                isCritical = false,
-                hasBeenSummarized = true
-            )
-        }
-    }
+    /**
+     * Obtiene el inicio como ZonedDateTime (con zona horaria)
+     */
+    fun getStartZonedTime(): ZonedDateTime = ZonedDateTime.of(startTime, timeZone)
 
-    val durationInMinutes: Long
-        get() = java.time.Duration.between(startTime, endTime).toMinutes()
+    /**
+     * Obtiene el fin como ZonedDateTime (con zona horaria)
+     */
+    fun getEndZonedTime(): ZonedDateTime = ZonedDateTime.of(endTime, timeZone)
 
-    fun isToday(): Boolean {
-        val today = LocalDateTime.now(ZoneId.systemDefault()).toLocalDate()
-        return startTime.toLocalDate() == today
-    }
+    /**
+     * Convierte el inicio a la zona horaria local del dispositivo
+     */
+    fun getStartInLocalZone(): ZonedDateTime = getStartZonedTime().withZoneSameInstant(ZoneId.systemDefault())
 
-    fun isTomorrow(): Boolean {
-        val tomorrow = LocalDateTime.now(ZoneId.systemDefault()).toLocalDate().plusDays(1)
-        return startTime.toLocalDate() == tomorrow
-    }
+    /**
+     * Convierte el fin a la zona horaria local del dispositivo
+     */
+    fun getEndInLocalZone(): ZonedDateTime = getEndZonedTime().withZoneSameInstant(ZoneId.systemDefault())
 
-    fun minutesUntilStart(): Long {
-        return java.time.Duration.between(LocalDateTime.now(ZoneId.systemDefault()), startTime).toMinutes()
-    }
+    /**
+     * Obtiene el inicio en epoch millis (UTC)
+     */
+    fun getStartMillis(): Long = getStartZonedTime().toInstant().toEpochMilli()
 
-    fun timeUntilStartDescription(): String {
-        val minutes = minutesUntilStart()
-        return when {
-            minutes < -60 -> "Empezó hace ${-minutes / 60} horas"
-            minutes < 0 -> "Empezó hace ${-minutes} minutos"
-            minutes == 0L -> "Empieza AHORA"
-            minutes < 60 -> "En $minutes minutos"
-            minutes < 1440 -> "En ${minutes / 60} horas"
-            else -> "En ${minutes / 1440} días"
-        }
-    }
+    /**
+     * Obtiene el fin en epoch millis (UTC)
+     */
+    fun getEndMillis(): Long = getEndZonedTime().toInstant().toEpochMilli()
 }

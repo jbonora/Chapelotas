@@ -1,12 +1,9 @@
+// Archivo: settings.gradle.kts
+// Ubicación: [Carpeta Raíz de tu Proyecto]/
+
 pluginManagement {
     repositories {
-        google {
-            content {
-                includeGroupByRegex("com\\.android.*")
-                includeGroupByRegex("com\\.google.*")
-                includeGroupByRegex("androidx.*")
-            }
-        }
+        google()
         mavenCentral()
         gradlePluginPortal()
     }
@@ -18,7 +15,5 @@ dependencyResolutionManagement {
         mavenCentral()
     }
 }
-
 rootProject.name = "Chapelotas"
 include(":app")
-

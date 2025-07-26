@@ -1,3 +1,8 @@
 <resources>
     <string name="app_name">Chapelotas</string>
+    <string name="battery_protection_title">Evitar cierre automático</string>
+    <string name="battery_protection_message">Tu dispositivo podría cerrar esta app en segundo plano. Activá las opciones para que siga funcionando correctamente.</string>
+    <string name="battery_protection_positive">Activar</string>
+    <string name="battery_protection_negative">Ahora no</string>
+    <string name="settings">Configuración</string>
 </resources>

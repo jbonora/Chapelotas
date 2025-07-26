@@ -1,135 +1,89 @@
 package com.chapelotas.app.domain.usecases
 
-import android.util.Log
-import com.chapelotas.app.data.database.ChapelotasDatabase
-import com.chapelotas.app.data.database.entities.EventPlan
-import com.chapelotas.app.domain.events.ChapelotasEvent
-import com.chapelotas.app.domain.events.ChapelotasEventBus
+import com.chapelotas.app.domain.debug.DebugLog
+import com.chapelotas.app.domain.events.AppEvent
+import com.chapelotas.app.domain.events.EventBus
+import com.chapelotas.app.domain.models.Task
 import com.chapelotas.app.domain.repositories.CalendarRepository
+import com.chapelotas.app.domain.repositories.TaskRepository
 import java.time.LocalDate
-import java.time.ZoneId
+import java.time.LocalDateTime
 import javax.inject.Inject
 import javax.inject.Singleton
 
-/**
- * Sincroniza eventos del calendario del dispositivo con la base de datos local
- */
 @Singleton
 class CalendarSyncUseCase @Inject constructor(
     private val calendarRepository: CalendarRepository,
-    private val database: ChapelotasDatabase,
-    private val eventBus: ChapelotasEventBus
+    private val taskRepository: TaskRepository,
+    private val eventBus: EventBus,
+    private val reminderEngine: ReminderEngine,
+    private val debugLog: DebugLog
 ) {
-    companion object {
-        private const val TAG = "CalendarSync"
+
+    suspend fun syncToday(): Int {
+        debugLog.add("SYNC: ==> Iniciando syncToday...")
+        if (!calendarRepository.hasCalendarReadPermission()) {
+            debugLog.add("SYNC: 🔴 ERROR - No hay permisos de calendario.")
+            return 0
+        }
+
+        val calendarEvents = calendarRepository.getEventsForDate(LocalDate.now())
+        debugLog.add("SYNC: Encontrados ${calendarEvents.size} eventos en calendario.")
+
+        // La lógica de comparación de tareas antes y después se simplifica o elimina
+        // ya que la UI reacciona directamente a los cambios en la base de datos.
+        taskRepository.syncWithCalendarEvents(calendarEvents)
+
+        debugLog.add("SYNC: Emitiendo 'SyncCompleted' al EventBus.")
+        eventBus.emit(AppEvent.SyncCompleted)
+        debugLog.add("SYNC: <== syncToday finalizado.")
+        return calendarEvents.size
     }
 
-    suspend fun syncTodayEvents() {
-        try {
-            Log.d(TAG, "Iniciando sincronización de eventos de hoy")
+    suspend fun startMonitoring() {
+        debugLog.add("MONITOR: ==> Iniciando monitoreo (startMonitoring).")
+        if (!calendarRepository.hasCalendarReadPermission()) {
+            debugLog.add("MONITOR: 🔴 ABORTADO - No hay permisos para iniciar el monitoreo.")
+            return
+        }
 
-            // Obtener eventos del calendario del dispositivo
-            val calendarEvents = calendarRepository.getTodayEvents()
-            Log.d(TAG, "Encontrados ${calendarEvents.size} eventos en el calendario")
-
-            // Obtener eventos existentes en nuestra BD
-            val existingEvents = database.eventPlanDao().getEventsByDate(LocalDate.now())
-            val existingEventIds = existingEvents.map { it.calendarEventId }.toSet()
-
-            var newEventsCount = 0
-            var updatedEventsCount = 0
-
-            // Procesar cada evento del calendario
-            calendarEvents.forEach { calendarEvent ->
-                if (calendarEvent.id !in existingEventIds) {
-                    // Evento nuevo - crear EventPlan
-                    val eventPlan = EventPlan(
-                        eventId = "cal_${calendarEvent.id}",
-                        dayDate = LocalDate.now(),
-                        calendarId = calendarEvent.calendarId,      // ← DEBE IR AQUÍ (3er parámetro)
-                        calendarEventId = calendarEvent.id,         // ← DESPUÉS DE calendarId
-                        title = calendarEvent.title,
-                        description = calendarEvent.description,
-                        startTime = calendarEvent.startTime,
-                        endTime = calendarEvent.endTime,
-                        location = calendarEvent.location,
-                        isAllDay = calendarEvent.isAllDay,
-                        isCritical = false,
-                        hasConflict = false,
-                        distance = com.chapelotas.app.data.database.entities.EventDistance.CERCA,
-                        resolutionStatus = com.chapelotas.app.data.database.entities.EventResolutionStatus.PENDING,
-                        aiPlanStatus = "AUTO_APPROVED",
-                        userModified = false
-                    )
-
-                    database.eventPlanDao().insert(eventPlan)
-                    newEventsCount++
-
-                    Log.d(TAG, "Nuevo evento sincronizado: ${eventPlan.title}")
-                } else {
-                    // Evento existente - actualizar si cambió
-                    val existingEvent = existingEvents.find { it.calendarEventId == calendarEvent.id }
-                    if (existingEvent != null && hasEventChanged(existingEvent, calendarEvent)) {
-                        val updatedEvent = existingEvent.copy(
-                            title = calendarEvent.title,
-                            startTime = calendarEvent.startTime,
-                            endTime = calendarEvent.endTime,
-                            location = calendarEvent.location,
-                            description = calendarEvent.description,
-                            updatedAt = java.time.LocalDateTime.now(ZoneId.systemDefault())
-                        )
-
-                        database.eventPlanDao().update(updatedEvent)
-                        updatedEventsCount++
-
-                        Log.d(TAG, "Evento actualizado: ${updatedEvent.title}")
-                    }
-                }
-            }
-
-            // Detectar eventos eliminados del calendario
-            val calendarEventIds = calendarEvents.map { it.id }.toSet()
-            val deletedEvents = existingEvents.filter {
-                it.calendarEventId !in calendarEventIds &&
-                        it.resolutionStatus != com.chapelotas.app.data.database.entities.EventResolutionStatus.COMPLETED
-            }
-
-            deletedEvents.forEach { event ->
-                // Marcar como cancelado en lugar de eliminar
-                database.eventPlanDao().updateResolutionStatus(
-                    event.eventId,
-                    com.chapelotas.app.data.database.entities.EventResolutionStatus.CANCELLED
-                )
-                Log.d(TAG, "Evento cancelado: ${event.title}")
-            }
-
-            // Emitir evento de sincronización completada
-            eventBus.emit(ChapelotasEvent.CalendarSyncCompleted(
-                newEvents = newEventsCount,
-                updatedEvents = updatedEventsCount,
-                deletedEvents = deletedEvents.size
-            ))
-
-            Log.d(TAG, "Sincronización completada: $newEventsCount nuevos, $updatedEventsCount actualizados, ${deletedEvents.size} cancelados")
-
-        } catch (e: Exception) {
-            Log.e(TAG, "Error durante sincronización", e)
-            eventBus.emit(ChapelotasEvent.MonkeyError(
-                error = "Error sincronizando calendario: ${e.message}",
-                willRetry = false,
-                retryInSeconds = 0
-            ))
+        calendarRepository.observeCalendarChanges().collect {
+            debugLog.add("MONITOR: ⚡️ ¡Cambio detectado en el calendario! Sincronizando...")
+            syncToday()
         }
     }
 
-    private fun hasEventChanged(
-        existingEvent: EventPlan,
-        calendarEvent: com.chapelotas.app.domain.entities.CalendarEvent
-    ): Boolean {
-        return existingEvent.title != calendarEvent.title ||
-                existingEvent.startTime != calendarEvent.startTime ||
-                existingEvent.endTime != calendarEvent.endTime ||
-                existingEvent.location != calendarEvent.location ||
-                existingEvent.description != calendarEvent.description
+    // --- INICIO DE LA CORRECCIÓN ---
+    // La función getDaySummary ahora usa las nuevas banderas booleanas
+    suspend fun getDaySummary(tasks: List<Task>): DaySummary {
+        val now = LocalDateTime.now()
+        val totalTasks = tasks.size
+        val completedTasks = tasks.count { it.isFinished }
+        val upcomingTasks = tasks.count { !it.isFinished && now.isBefore(it.scheduledTime) }
+        val ongoingTasks = tasks.count { !it.isFinished && now.isAfter(it.scheduledTime) && now.isBefore(it.endTime ?: it.scheduledTime.plusHours(1)) }
+        val missedTasks = tasks.count { !it.isFinished && now.isAfter(it.endTime ?: it.scheduledTime.plusHours(1)) }
+
+        return DaySummary(
+            totalTasks = totalTasks,
+            completedTasks = completedTasks,
+            upcomingTasks = upcomingTasks,
+            ongoingTasks = ongoingTasks,
+            missedTasks = missedTasks
+        )
     }
+
+    data class DaySummary(
+        val totalTasks: Int,
+        val completedTasks: Int,
+        val upcomingTasks: Int,
+        val ongoingTasks: Int,
+        val missedTasks: Int
+    ) {
+        val pendingTasks: Int
+            get() = upcomingTasks + ongoingTasks + missedTasks
+
+        val completionRate: Float
+            get() = if (totalTasks > 0) completedTasks.toFloat() / totalTasks else 0f
+    }
+    // --- FIN DE LA CORRECCIÓN ---
 }
