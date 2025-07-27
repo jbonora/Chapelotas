@@ -13,17 +13,23 @@ import java.time.ZoneId
 import javax.inject.Inject
 import javax.inject.Singleton
 
+/**
+ * Implementación del TaskRepository.
+ * Conecta la lógica de negocio con las operaciones de la base de datos (DAO).
+ */
 @Singleton
 class TaskRepositoryImpl @Inject constructor(
     private val taskDao: TaskDao
 ) : TaskRepository {
 
+    // Convierte un objeto de dominio (Task) a una entidad de base de datos (TaskEntity) y lo inserta.
     override suspend fun createTask(task: Task): String {
         val entity = TaskEntity.fromDomainModel(task)
         taskDao.insert(entity)
         return entity.id
     }
 
+    // Busca una entidad en la BD y la convierte a un objeto de dominio.
     override suspend fun getTask(taskId: String): Task? {
         return taskDao.getTask(taskId)?.toDomainModel()
     }
@@ -32,10 +38,12 @@ class TaskRepositoryImpl @Inject constructor(
         taskDao.deleteById(taskId)
     }
 
+    // Observa una entidad y la transforma en un flujo de objetos de dominio.
     override fun observeTask(taskId: String): Flow<Task?> {
         return taskDao.observeTask(taskId).map { it?.toDomainModel() }
     }
 
+    // Observa las tareas de una fecha y las transforma a objetos de dominio.
     override fun observeTasksForDate(date: LocalDate): Flow<List<Task>> {
         val startOfDay = date.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
         val endOfDay = date.plusDays(1).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
@@ -60,6 +68,7 @@ class TaskRepositoryImpl @Inject constructor(
         return taskDao.getTaskByCalendarId(calendarEventId)?.toDomainModel()
     }
 
+    // --- Simples delegaciones de acciones al DAO ---
     override suspend fun acknowledgeTask(taskId: String) {
         taskDao.acknowledgeTask(taskId)
     }
@@ -83,6 +92,10 @@ class TaskRepositoryImpl @Inject constructor(
         taskDao.updateInitialReminderState(taskId, reminderCount, nextReminderMillis)
     }
 
+    /**
+     * Lógica de sincronización con eventos del calendario.
+     * Añade nuevos, actualiza los existentes y elimina los que ya no están.
+     */
     override suspend fun syncWithCalendarEvents(events: List<CalendarEvent>) {
         val activeCalendarIds = events.map { it.id }
         taskDao.deleteRemovedCalendarEvents(activeCalendarIds)
@@ -90,11 +103,13 @@ class TaskRepositoryImpl @Inject constructor(
         events.forEach { event ->
             val taskId = "cal_${event.id}"
             val existingTaskEntity = taskDao.getTask(taskId)
+
             if (existingTaskEntity == null) {
+                // Si la tarea no existe, se crea desde el evento del calendario.
                 val newTask = TaskEntity.fromCalendarEvent(event)
                 taskDao.insert(newTask)
             } else {
-                // Solo actualiza si los datos del calendario son diferentes
+                // Si ya existe, se actualiza solo si algo cambió.
                 val updatedTask = existingTaskEntity.copy(
                     title = event.title,
                     description = event.description,

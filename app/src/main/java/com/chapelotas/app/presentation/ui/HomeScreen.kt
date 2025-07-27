@@ -5,46 +5,19 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.outlined.Check
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -53,14 +26,13 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
 import com.chapelotas.app.battery.BatteryProtectionManager
 import com.chapelotas.app.domain.models.Task
+import com.chapelotas.app.domain.models.TaskStatus
 import com.chapelotas.app.presentation.viewmodels.MainViewModel
-import kotlinx.coroutines.delay
 import java.time.Duration
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
@@ -178,7 +150,6 @@ fun TaskList(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TaskCard(
     task: Task,
@@ -188,17 +159,9 @@ fun TaskCard(
     val timeFormatter = DateTimeFormatter.ofPattern("HH:mm")
     val dayFormatter = DateTimeFormatter.ofPattern("EEEE d", Locale("es", "ES"))
 
-    var relativeTimeText by remember { mutableStateOf(getRelativeTimeText(task)) }
-    LaunchedEffect(task) {
-        while (true) {
-            relativeTimeText = getRelativeTimeText(task)
-            delay(1000)
-        }
-    }
-
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = getStatusColor(task))
+        colors = CardDefaults.cardColors(containerColor = task.status.toColor())
     ) {
         Column(
             modifier = Modifier
@@ -259,7 +222,7 @@ fun TaskCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Text(
-                    text = relativeTimeText,
+                    text = getRelativeTimeText(task),
                     style = MaterialTheme.typography.bodySmall,
                     fontStyle = FontStyle.Italic,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -269,40 +232,34 @@ fun TaskCard(
     }
 }
 
-fun getRelativeTimeText(task: Task): String {
-    val now = LocalDateTime.now()
-    val endTime = task.endTime ?: task.scheduledTime.plusHours(1)
-
-    return when {
-        task.isFinished -> "Terminada"
-        now.isBefore(task.scheduledTime) -> {
-            val duration = Duration.between(now, task.scheduledTime)
-            if (duration.toDays() > 0) "Faltan ${duration.toDays()}d ${duration.toHours() % 24}h"
-            else if (duration.toHours() > 0) "Faltan ${duration.toHours()}h ${duration.toMinutes() % 60}m"
-            else "Faltan ${duration.toMinutes() + 1}m"
-        }
-        now.isAfter(endTime) -> {
-            val duration = Duration.between(endTime, now)
-            if (duration.toMinutes() < 1) return if (task.isAcknowledged) "Demorada" else "Omitida"
-            if (duration.toDays() > 0) "Pasaron ${duration.toDays()}d ${duration.toHours() % 24}h"
-            else if (duration.toHours() > 0) "Pasaron ${duration.toHours()}h ${duration.toMinutes() % 60}m"
-            else "Pasaron ${duration.toMinutes()}m"
-        }
-        else -> "En curso"
+@Composable
+fun TaskStatus.toColor(): Color {
+    return when (this) {
+        TaskStatus.FINISHED -> MaterialTheme.colorScheme.surfaceVariant
+        // --- LA LÍNEA CORREGIDA ---
+        // Se elimina la referencia a 'MISSED', ya que 'DELAYED' cubre todos los casos de tareas pasadas
+        TaskStatus.DELAYED -> MaterialTheme.colorScheme.errorContainer
+        TaskStatus.ONGOING -> MaterialTheme.colorScheme.primaryContainer
+        TaskStatus.UPCOMING -> MaterialTheme.colorScheme.surface
     }
 }
 
-@Composable
-fun getStatusColor(task: Task): Color {
+fun getRelativeTimeText(task: Task): String {
     val now = LocalDateTime.now()
-    val endTime = task.endTime ?: task.scheduledTime.plusHours(1)
-
-    return when {
-        task.isFinished -> MaterialTheme.colorScheme.surfaceVariant
-        now.isAfter(endTime) -> MaterialTheme.colorScheme.errorContainer
-        task.isAcknowledged -> MaterialTheme.colorScheme.secondaryContainer
-        now.isAfter(task.scheduledTime) -> MaterialTheme.colorScheme.primaryContainer
-        else -> MaterialTheme.colorScheme.surface
+    return when (task.status) {
+        TaskStatus.FINISHED -> "Terminada"
+        TaskStatus.UPCOMING -> {
+            val duration = Duration.between(now, task.scheduledTime)
+            when {
+                duration.toDays() > 0 -> "Faltan ${duration.toDays()}d ${duration.toHours() % 24}h"
+                duration.toHours() > 0 -> "Faltan ${duration.toHours()}h ${duration.toMinutes() % 60}m"
+                else -> "Faltan ${duration.toMinutes() + 1}m"
+            }
+        }
+        TaskStatus.ONGOING -> "En curso"
+        // --- LA LÍNEA CORREGIDA ---
+        // Se elimina la referencia a 'MISSED'
+        TaskStatus.DELAYED -> "Demorada"
     }
 }
 

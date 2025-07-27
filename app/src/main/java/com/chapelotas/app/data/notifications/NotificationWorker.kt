@@ -4,14 +4,14 @@ import android.content.Context
 import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
-import com.chapelotas.app.domain.entities.ChapelotasNotification
 import com.chapelotas.app.domain.repositories.NotificationRepository
-import com.google.gson.Gson
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 
 /**
- * Worker que ejecuta las notificaciones programadas
+ * Worker obsoleto. Con la nueva lógica de AlarmManager, este worker ya no es necesario.
+ * Se mantiene vacío para evitar errores de compilación si estuviera referenciado
+ * en alguna parte del sistema de build, pero no tiene ninguna funcionalidad activa.
  */
 @HiltWorker
 class NotificationWorker @AssistedInject constructor(
@@ -21,19 +21,8 @@ class NotificationWorker @AssistedInject constructor(
 ) : CoroutineWorker(appContext, workerParams) {
 
     override suspend fun doWork(): Result {
-        return try {
-            // Obtener la notificación del input data
-            val notificationJson = inputData.getString(NotificationRepositoryImpl.NOTIFICATION_DATA_KEY)
-                ?: return Result.failure()
-
-            val notification = Gson().fromJson(notificationJson, ChapelotasNotification::class.java)
-
-            // Mostrar la notificación
-            notificationRepository.showImmediateNotification(notification)
-
-            Result.success()
-        } catch (e: Exception) {
-            Result.failure()
-        }
+        // La lógica anterior ha sido eliminada. El worker ahora simplemente
+        // reporta que ha completado su "trabajo" (que es no hacer nada) con éxito.
+        return Result.success()
     }
 }

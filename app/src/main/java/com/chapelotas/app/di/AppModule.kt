@@ -5,6 +5,7 @@ import com.chapelotas.app.data.database.TaskDatabase
 import com.chapelotas.app.data.database.TaskDao
 import com.chapelotas.app.domain.debug.DebugLog
 import com.chapelotas.app.domain.events.EventBus
+import com.chapelotas.app.domain.permissions.AppStatusManager
 import com.chapelotas.app.domain.repositories.CalendarRepository
 import com.chapelotas.app.domain.repositories.NotificationRepository
 import com.chapelotas.app.domain.repositories.PreferencesRepository
@@ -50,29 +51,36 @@ object AppModule {
         return EventBus()
     }
 
+    // --- LA SECCIÓN CORREGIDA ---
+    // Se han reordenado y añadido los parámetros para que coincidan con la
+    // nueva definición de `CalendarSyncUseCase`.
     @Provides
     @Singleton
     fun provideCalendarSyncUseCase(
         calendarRepository: CalendarRepository,
         taskRepository: TaskRepository,
-        eventBus: EventBus,
         reminderEngine: ReminderEngine,
-        debugLog: DebugLog
+        debugLog: DebugLog,
+        appStatusManager: AppStatusManager // El nuevo parámetro que faltaba
     ): CalendarSyncUseCase {
-        return CalendarSyncUseCase(calendarRepository, taskRepository, eventBus, reminderEngine, debugLog)
+        return CalendarSyncUseCase(
+            calendarRepository,
+            taskRepository,
+            reminderEngine,
+            debugLog,
+            appStatusManager
+        )
     }
+    // -------------------------
 
-    // --- INICIO DE LA CORRECCIÓN ---
     @Provides
     @Singleton
     fun provideReminderEngine(
         taskRepository: TaskRepository,
         notificationRepository: NotificationRepository,
-        preferencesRepository: PreferencesRepository, // <-- Añadimos el repositorio de preferencias
+        preferencesRepository: PreferencesRepository,
         debugLog: DebugLog
     ): ReminderEngine {
-        // <-- Se lo pasamos al constructor
         return ReminderEngine(taskRepository, notificationRepository, preferencesRepository, debugLog)
     }
-    // --- FIN DE LA CORRECCIÓN ---
 }

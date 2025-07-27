@@ -6,15 +6,13 @@ import com.chapelotas.app.domain.entities.ChapelotasNotification
 import com.chapelotas.app.domain.entities.NotificationAction
 import com.chapelotas.app.domain.models.AppSettings
 import com.chapelotas.app.domain.models.Task
+import com.chapelotas.app.domain.models.TaskStatus
 import com.chapelotas.app.domain.repositories.NotificationRepository
 import com.chapelotas.app.domain.repositories.PreferencesRepository
 import com.chapelotas.app.domain.repositories.TaskRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.time.LocalDateTime
 import java.time.temporal.ChronoUnit
@@ -30,124 +28,68 @@ class ReminderEngine @Inject constructor(
 ) {
 
     private val coroutineScope = CoroutineScope(Dispatchers.Default)
-    private val _settings = MutableStateFlow(AppSettings())
-    private val settings = _settings.asStateFlow()
-
-    init {
-        coroutineScope.launch {
-            preferencesRepository.observeAppSettings().distinctUntilChanged().collect { newSettings ->
-                _settings.value = newSettings
-                debugLog.add("⚙️ SETTINGS: Configuración de Chapelotas actualizada.")
-            }
-        }
-    }
+    private val settings: StateFlow<AppSettings> = preferencesRepository.observeAppSettings()
+        .stateIn(
+            scope = coroutineScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = AppSettings()
+        )
 
     companion object {
         private const val TAG = "ReminderEngine"
     }
 
-    /**
-     * Punto de entrada principal del motor. Revisa periódicamente las tareas pendientes.
-     */
-    suspend fun checkAndSendReminders() {
-        val now = LocalDateTime.now()
-        val pendingTasks = taskRepository.getTasksNeedingReminder()
-
-        for (task in pendingTasks) {
-            evaluateTask(task, now)
-        }
-    }
-
-    /**
-     * Asegura la integridad de los datos al inicio o tras una sincronización.
-     * Re-calcula el próximo aviso para todas las tareas activas.
-     */
-    suspend fun initializeTaskReminders() {
-        debugLog.add("ENGINE: Re-inicializando recordatorios para todas las tareas activas...")
-        // Obtenemos todas las tareas que no están finalizadas para re-calcular su próximo aviso.
-        val activeTasks = taskRepository.getTasksNeedingReminder()
-        for (task in activeTasks) {
-            val nextReminder = getNextReminderTime(task, LocalDateTime.now())
-            if (task.nextReminderAt != nextReminder) {
-                taskRepository.updateInitialReminderState(task.id, task.reminderCount, nextReminder)
-            }
-        }
-    }
-
-    /**
-     * Lógica central clara y modular.
-     * Determina la temporalidad de la tarea y delega a la función correspondiente.
-     */
-    private suspend fun evaluateTask(task: Task, now: LocalDateTime) {
-        if (task.isFinished) {
-            // Lógica para el mensaje de felicitación único (si es necesario)
+    suspend fun processAndSendReminder(taskId: String) {
+        val task = taskRepository.getTask(taskId)
+        if (task == null || task.isFinished) {
+            notificationRepository.cancelReminder(taskId)
             return
         }
 
-        val endTime = task.endTime ?: task.scheduledTime.plusHours(1)
+        val now = LocalDateTime.now()
+        val strategy = ReminderStrategy.fromTask(task, settings.value)
+        if (strategy is NoReminderStrategy) return
 
-        // Si la tarea necesita un recordatorio (porque es el momento o porque el anterior falló)
-        if (task.nextReminderAt == null || now.isAfter(task.nextReminderAt)) {
-            when {
-                now.isAfter(endTime) -> evaluatePastTask(task, now)
-                now.isAfter(task.scheduledTime) -> evaluatePresentTask(task, now)
-                else -> evaluateFutureTask(task, now)
+        val message = strategy.getMessage(task, now)
+        val nextReminderTime = strategy.getNextReminderTime(task, now, settings.value)
+
+        sendNotification(task, message, strategy.actions, nextReminderTime)
+        scheduleNextReminder(task.id, nextReminderTime)
+    }
+
+    suspend fun initializeOrUpdateAllReminders() {
+        debugLog.add("ENGINE: Inicializando/Actualizando todas las alarmas...")
+        val activeTasks = taskRepository.observeAllTasks().first().filter { !it.isFinished }
+        val now = LocalDateTime.now()
+        val currentSettings = settings.value
+
+        for (task in activeTasks) {
+            val strategy = ReminderStrategy.fromTask(task, currentSettings)
+            val nextReminder = strategy.getNextReminderTime(task, now, currentSettings)
+
+            if (task.status == TaskStatus.DELAYED) {
+                val message = strategy.getMessage(task, now)
+                sendNotification(task, message, strategy.actions, nextReminder)
+            }
+
+            if (task.nextReminderAt != nextReminder) {
+                taskRepository.updateInitialReminderState(task.id, task.reminderCount, nextReminder)
+                scheduleNextReminder(task.id, nextReminder)
             }
         }
     }
 
-    // --- MÉTODOS MODULARES POR TEMPORALIDAD ---
-
-    private suspend fun evaluateFutureTask(task: Task, now: LocalDateTime) {
-        val nextReminderTime = getNextUpcomingReminderTime(task, now)
-
-        val messageTemplate = if (task.isAcknowledged) {
-            "Me dijiste OK para '{TASK_TITLE}' pero como siempre te olvidás, te lo recuerdo (faltan {MINUTES} min)."
+    private fun scheduleNextReminder(taskId: String, nextReminderTime: LocalDateTime?) {
+        if (nextReminderTime != null) {
+            notificationRepository.scheduleExactReminder(taskId, nextReminderTime)
         } else {
-            "En {MINUTES} min empieza '{TASK_TITLE}'. A ver si alguna vez te reivindicás."
+            notificationRepository.cancelReminder(taskId)
         }
-        val minutesUntil = ChronoUnit.MINUTES.between(now, task.scheduledTime) + 1
-        val message = messageTemplate
-            .replace("{TASK_TITLE}", task.title)
-            .replace("{MINUTES}", minutesUntil.toString())
-
-        val actions = if (task.isAcknowledged) listOf(NotificationAction.FINISH_DONE) else listOf(NotificationAction.ACKNOWLEDGE, NotificationAction.FINISH_DONE)
-        sendReminder(task, message, nextReminderTime, actions)
     }
 
-    private suspend fun evaluatePresentTask(task: Task, now: LocalDateTime) {
-        val currentSettings = settings.first()
-        val message: String
-        val actions: List<NotificationAction>
-
-        if (task.isAcknowledged) {
-            message = "Bueh... a ver si algún día terminás '${task.title}'..."
-            actions = listOf(NotificationAction.FINISH_DONE)
-        } else {
-            message = "Ya deberías estar en '${task.title}'... ¿No pensás darme bola?"
-            actions = listOf(NotificationAction.ACKNOWLEDGE, NotificationAction.FINISH_DONE)
-        }
-        sendReminder(task, message, now.plusMinutes(currentSettings.ongoingInterval.toLong()), actions)
-    }
-
-    private suspend fun evaluatePastTask(task: Task, now: LocalDateTime) {
-        val currentSettings = settings.first()
-        val message: String
-        val actions: List<NotificationAction>
-
-        if (task.isAcknowledged) {
-            message = "¿Ya abandonaste o seguís con la tarea '${task.title}'? Dale, definí."
-            actions = listOf(NotificationAction.FINISH_DONE)
-        } else {
-            message = "${currentSettings.userName}, la tarea '${task.title}' ya pasó y ni le diste bola. ¿QUÉ ONDA?"
-            actions = listOf(NotificationAction.ACKNOWLEDGE, NotificationAction.FINISH_DONE)
-        }
-        sendReminder(task, message, now.plusMinutes(currentSettings.missedInterval.toLong()), actions)
-    }
-
-    // --- LÓGICA DE ENVÍO Y CÁLCULO DE TIEMPO ---
-
-    private suspend fun sendReminder(task: Task, message: String, nextReminderTime: LocalDateTime?, actions: List<NotificationAction>) {
+    // --- FUNCIÓN CORREGIDA ---
+    // Ahora recibe el "nextReminderTime" para guardarlo correctamente en la base de datos.
+    private suspend fun sendNotification(task: Task, message: String, actions: List<NotificationAction>, nextReminderTime: LocalDateTime?) {
         Log.i(TAG, ">> Enviando recordatorio para '${task.title}': $message")
 
         val notification = ChapelotasNotification(
@@ -157,41 +99,88 @@ class ReminderEngine @Inject constructor(
             actions = actions
         )
         notificationRepository.showImmediateNotification(notification)
+        // Ahora se guarda el valor correcto, lo que disparará la actualización en la UI de Debug.
         taskRepository.recordReminderSent(task.id, nextReminderTime)
     }
+}
 
-    // --- INICIO DE LA CORRECCIÓN ---
-    /**
-     * Calcula el próximo aviso MÁS CERCANO en el futuro basado en los `Settings`.
-     */
-    private fun getNextUpcomingReminderTime(task: Task, now: LocalDateTime): LocalDateTime? {
-        val settings = _settings.value
-        val reminderMinutes = listOf(settings.firstReminder, settings.secondReminder, settings.thirdReminder, 0).distinct()
 
-        // 1. Calcula todos los posibles momentos de aviso
-        val potentialTimes = reminderMinutes.map { task.scheduledTime.minusMinutes(it.toLong()) }
+// --- El resto de las clases Strategy no necesitan cambios ---
+sealed class ReminderStrategy(val actions: List<NotificationAction>) {
+    abstract fun getMessage(task: Task, now: LocalDateTime): String
+    abstract fun getNextReminderTime(task: Task, now: LocalDateTime, settings: AppSettings): LocalDateTime?
 
-        // 2. Filtra solo los que están en el futuro
-        val futureTimes = potentialTimes.filter { it.isAfter(now) }
-
-        // 3. Devuelve el más cercano en el tiempo (el mínimo)
-        return futureTimes.minOrNull()
-    }
-    // --- FIN DE LA CORRECCIÓN ---
-
-    /**
-     * Lógica unificada para calcular el próximo recordatorio de cualquier tarea activa.
-     */
-    private fun getNextReminderTime(task: Task, now: LocalDateTime): LocalDateTime? {
-        if (task.isFinished) return null
-
-        val endTime = task.endTime ?: task.scheduledTime.plusHours(1)
-        val settings = _settings.value
-
-        return when {
-            now.isAfter(endTime) -> now.plusMinutes(settings.missedInterval.toLong())
-            now.isAfter(task.scheduledTime) -> now.plusMinutes(settings.ongoingInterval.toLong())
-            else -> getNextUpcomingReminderTime(task, now)
+    companion object {
+        fun fromTask(task: Task, settings: AppSettings): ReminderStrategy {
+            return when (task.status) {
+                TaskStatus.UPCOMING -> UpcomingReminderStrategy(task.isAcknowledged)
+                TaskStatus.ONGOING -> OngoingReminderStrategy(task.isAcknowledged)
+                TaskStatus.DELAYED -> PastReminderStrategy(task.isAcknowledged, settings.userName)
+                TaskStatus.FINISHED -> NoReminderStrategy
+            }
         }
     }
+}
+
+class UpcomingReminderStrategy(isAcknowledged: Boolean) : ReminderStrategy(
+    if (isAcknowledged) listOf(NotificationAction.FINISH_DONE) else listOf(NotificationAction.ACKNOWLEDGE, NotificationAction.FINISH_DONE)
+) {
+    override fun getMessage(task: Task, now: LocalDateTime): String {
+        val minutesUntil = ChronoUnit.MINUTES.between(now, task.scheduledTime) + 1
+        return if (actions.contains(NotificationAction.ACKNOWLEDGE)) {
+            "En $minutesUntil min empieza '${task.title}'. A ver si te ponés las pilas."
+        } else {
+            "Ya me dijiste que sí para '${task.title}', pero te lo recuerdo por si acaso (faltan $minutesUntil min)."
+        }
+    }
+
+    override fun getNextReminderTime(task: Task, now: LocalDateTime, settings: AppSettings): LocalDateTime? {
+        val reminderMinutes = listOf(settings.firstReminder, settings.secondReminder, settings.thirdReminder, 0).distinct()
+        return reminderMinutes
+            .map { task.scheduledTime.minusMinutes(it.toLong()) }
+            .filter { it.isAfter(now) }
+            .minOrNull()
+    }
+}
+
+class OngoingReminderStrategy(private val isAcknowledged: Boolean) : ReminderStrategy(
+    if (isAcknowledged) listOf(NotificationAction.FINISH_DONE) else listOf(NotificationAction.ACKNOWLEDGE, NotificationAction.FINISH_DONE)
+) {
+    override fun getMessage(task: Task, now: LocalDateTime): String {
+        return if (isAcknowledged) {
+            "Dale que va... A ver si terminamos con '${task.title}' de una vez."
+        } else {
+            "Ya deberías estar haciendo '${task.title}'... ¿Vas a hacer algo o no?"
+        }
+    }
+
+    override fun getNextReminderTime(task: Task, now: LocalDateTime, settings: AppSettings): LocalDateTime {
+        val interval = if (isAcknowledged) {
+            settings.lowUrgencyInterval.toLong()
+        } else {
+            settings.highUrgencyInterval.toLong()
+        }
+        return now.plusMinutes(interval)
+    }
+}
+
+class PastReminderStrategy(private val isAcknowledged: Boolean, private val userName: String) : ReminderStrategy(
+    if (isAcknowledged) listOf(NotificationAction.FINISH_DONE) else listOf(NotificationAction.ACKNOWLEDGE, NotificationAction.FINISH_DONE)
+) {
+    override fun getMessage(task: Task, now: LocalDateTime): String {
+        return if (isAcknowledged) {
+            "¿Ya te rendiste o seguís con '${task.title}'? Definí, campeón."
+        } else {
+            "$userName, la tarea '${task.title}' ya pasó y ni la miraste. Un desastre."
+        }
+    }
+
+    override fun getNextReminderTime(task: Task, now: LocalDateTime, settings: AppSettings): LocalDateTime {
+        return now.plusMinutes(settings.highUrgencyInterval.toLong())
+    }
+}
+
+object NoReminderStrategy : ReminderStrategy(emptyList()) {
+    override fun getMessage(task: Task, now: LocalDateTime): String = ""
+    override fun getNextReminderTime(task: Task, now: LocalDateTime, settings: AppSettings): LocalDateTime? = null
 }

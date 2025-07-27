@@ -73,6 +73,7 @@ dependencies {
     implementation(libs.androidx.lifecycle.compose)
     implementation(libs.androidx.navigation.compose)
     implementation(libs.material)
+    implementation("androidx.core:core-splashscreen:1.0.1")
 
     // ---- Room (Base de datos local) ----
     implementation(libs.androidx.room.runtime)

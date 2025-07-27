@@ -1,10 +1,8 @@
 package com.chapelotas.app.data.calendar
 
-import android.Manifest
 import android.content.ContentResolver
 import android.content.ContentUris
 import android.content.Context
-import android.content.pm.PackageManager
 import android.database.ContentObserver
 import android.database.Cursor
 import android.net.Uri
@@ -12,7 +10,6 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.CalendarContract
 import android.util.Log
-import androidx.core.content.ContextCompat
 import com.chapelotas.app.domain.entities.CalendarEvent
 import com.chapelotas.app.domain.repositories.CalendarRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -66,18 +63,7 @@ class CalendarRepositoryImpl @Inject constructor(
         private const val CALENDAR_NAME_INDEX = 1
     }
 
-    override fun hasCalendarReadPermission(): Boolean {
-        return ContextCompat.checkSelfPermission(
-            context, Manifest.permission.READ_CALENDAR
-        ) == PackageManager.PERMISSION_GRANTED
-    }
-
     override suspend fun getAvailableCalendars(): Map<Long, String> = withContext(Dispatchers.IO) {
-        if (!hasCalendarReadPermission()) {
-            Log.w("CalendarRepo", "Intento de acceso a calendarios sin permiso.")
-            return@withContext emptyMap()
-        }
-
         val calendars = mutableMapOf<Long, String>()
         val uri: Uri = CalendarContract.Calendars.CONTENT_URI
         val selection = "${CalendarContract.Calendars.VISIBLE} = ?"
@@ -97,25 +83,18 @@ class CalendarRepositoryImpl @Inject constructor(
     }
 
     override suspend fun getEventsForDate(date: LocalDate): List<CalendarEvent> = withContext(Dispatchers.IO) {
-        if (!hasCalendarReadPermission()) return@withContext emptyList()
         val startOfDay = date.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
         val endOfDay = date.plusDays(1).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
         getEventsInTimeRange(startOfDay, endOfDay)
     }
 
     override suspend fun getEventsInRange(startDate: LocalDate, endDate: LocalDate): List<CalendarEvent> = withContext(Dispatchers.IO) {
-        if (!hasCalendarReadPermission()) return@withContext emptyList()
         val startMillis = startDate.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
         val endMillis = endDate.plusDays(1).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
         getEventsInTimeRange(startMillis, endMillis)
     }
 
     override fun observeCalendarChanges(): Flow<Unit> = callbackFlow {
-        if (!hasCalendarReadPermission()) {
-            Log.w("CalendarRepo", "No se puede observar el calendario sin permisos.")
-            close(SecurityException("Permiso READ_CALENDAR denegado para observar cambios."))
-            return@callbackFlow
-        }
         val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
             override fun onChange(selfChange: Boolean) { trySend(Unit) }
         }

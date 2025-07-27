@@ -17,8 +17,8 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.chapelotas.app.domain.debug.DebugLog
 import com.chapelotas.app.domain.models.Task
+import com.chapelotas.app.domain.models.TaskStatus
 import com.chapelotas.app.presentation.viewmodels.DebugViewModel
-import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -37,7 +37,7 @@ fun DebugScreen(
         Column(modifier = Modifier.padding(paddingValues).fillMaxSize()) {
             Text("Fuente de la Verdad (Tasks en BD)", modifier = Modifier.padding(16.dp), style = MaterialTheme.typography.titleMedium)
             LazyColumn(modifier = Modifier.fillMaxWidth().weight(1f).padding(horizontal = 16.dp)) {
-                items(allTasks) { task ->
+                items(allTasks, key = { it.id }) { task ->
                     DebugTaskCard(task)
                 }
             }
@@ -68,32 +68,42 @@ fun DebugTaskCard(task: Task) {
             Divider(modifier = Modifier.padding(vertical = 4.dp))
 
             Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-                Text("Temporalidad: ${getDebugStatusText(task)}", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
+                Text("Estado: ${task.status.name}", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
             }
             Row(horizontalArrangement = Arrangement.spacedBy(16.dp), modifier = Modifier.fillMaxWidth()) {
                 Text("Aceptado: ${if (task.isAcknowledged) "✅" else "❌"}", fontSize = 12.sp)
                 Text("Terminado: ${if (task.isFinished) "✅" else "❌"}", fontSize = 12.sp)
                 Text("Avisos: ${task.reminderCount}", fontSize = 12.sp)
             }
-            task.nextReminderAt?.let {
+
+            task.lastReminderAt?.let {
                 Text(
-                    "Próximo aviso: ${it.format(dateTimeFormatter)}",
+                    "Último aviso: ${it.format(dateTimeFormatter)}",
                     fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.secondary
+                    color = Color.Gray
                 )
             }
+
+            // --- LÓGICA CORREGIDA ---
+            // Si la tarea está terminada, muestra "Terminada".
+            // Si no, muestra el próximo aviso si existe.
+            if (task.isFinished) {
+                Text(
+                    "Próximo aviso: Terminada",
+                    fontSize = 12.sp,
+                    color = Color(0xFF00C853), // Un verde para indicar éxito
+                    fontWeight = FontWeight.Bold
+                )
+            } else {
+                task.nextReminderAt?.let {
+                    Text(
+                        "Próximo aviso: ${it.format(dateTimeFormatter)}",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.secondary
+                    )
+                }
+            }
+            // ------------------------
         }
-    }
-}
-
-// Función auxiliar para mostrar la temporalidad en Debug
-fun getDebugStatusText(task: Task): String {
-    val now = LocalDateTime.now()
-    val endTime = task.endTime ?: task.scheduledTime.plusHours(1)
-
-    return when {
-        now.isAfter(endTime) -> "Pasado"
-        now.isAfter(task.scheduledTime) -> "Presente (En curso)"
-        else -> "Futuro (Por venir)"
     }
 }

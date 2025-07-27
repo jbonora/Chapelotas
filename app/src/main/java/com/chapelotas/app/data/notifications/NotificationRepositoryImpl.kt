@@ -1,6 +1,7 @@
 package com.chapelotas.app.data.notifications
 
 import android.Manifest
+import android.app.AlarmManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -24,6 +25,8 @@ import com.chapelotas.app.domain.entities.NotificationType
 import com.chapelotas.app.domain.repositories.NotificationRepository
 import com.chapelotas.app.presentation.ui.CriticalAlertActivity
 import dagger.hilt.android.qualifiers.ApplicationContext
+import java.time.LocalDateTime
+import java.time.ZoneId
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -33,12 +36,11 @@ class NotificationRepositoryImpl @Inject constructor(
 ) : NotificationRepository {
 
     private val notificationManager = NotificationManagerCompat.from(context)
+    private val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
 
     companion object {
         const val CHANNEL_GENERAL = "chapelotas_general"
         const val CHANNEL_CRITICAL = "chapelotas_critical"
-        const val CHANNEL_SERVICE = "chapelotas_service"
-        const val NOTIFICATION_DATA_KEY = "notification_data"
         private const val REQUEST_CODE_OPEN = 1000
     }
 
@@ -47,66 +49,71 @@ class NotificationRepositoryImpl @Inject constructor(
     }
 
     override suspend fun showImmediateNotification(notification: ChapelotasNotification) {
-        when (notification.type) {
-            NotificationType.CRITICAL_ALERT -> showCriticalAlert(notification)
-            else -> showStandardNotification(notification)
+        if (notification.type == NotificationType.CRITICAL_ALERT) {
+            showCriticalAlert(notification)
+        } else {
+            showStandardNotification(notification)
         }
     }
 
-    private fun showStandardNotification(notification: ChapelotasNotification) {
-        val channelId = CHANNEL_GENERAL
-        val notificationIdLong = notification.id.toLongOrNull() ?: notification.id.hashCode().toLong()
-        val androidNotifId = (notificationIdLong and Int.MAX_VALUE.toLong()).toInt()
-
-        val openAppIntent = Intent(context, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
-            putExtra("navigation_route", "today")
-            putExtra("notification_id", notificationIdLong)
+    override fun scheduleExactReminder(taskId: String, triggerAt: LocalDateTime) {
+        val intent = Intent(context, NotificationAlarmReceiver::class.java).apply {
+            action = NotificationAlarmReceiver.ACTION_TRIGGER_REMINDER
+            putExtra(NotificationAlarmReceiver.EXTRA_TASK_ID, taskId)
         }
-        val openAppPendingIntent = PendingIntent.getActivity(
+
+        // Se usa el hashcode del ID de la tarea como un ID único para el PendingIntent de la alarma.
+        val alarmRequestCode = taskId.hashCode()
+
+        val pendingIntent = PendingIntent.getBroadcast(
             context,
-            REQUEST_CODE_OPEN + androidNotifId,
-            openAppIntent,
+            alarmRequestCode,
+            intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val builder = NotificationCompat.Builder(context, channelId)
-            .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle("Chapelotas tiene un mensaje")
-            .setContentText(notification.message)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(notification.message))
-            .setSubText("Chapelotas")
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setCategory(NotificationCompat.CATEGORY_EVENT)
-            .setContentIntent(openAppPendingIntent)
-            .setAutoCancel(true)
-            .setFullScreenIntent(openAppPendingIntent, true)
+        val triggerAtMillis = triggerAt.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
 
-        // Añadir acciones dinámicamente
-        notification.actions.forEach { action ->
-            val pendingIntent = createActionIntent(androidNotifId, notification, action)
-            val actionText = when (action) {
-                NotificationAction.ACKNOWLEDGE -> "Entendido"
-                NotificationAction.FINISH_DONE -> "Done"
+        // Se utiliza setExactAndAllowWhileIdle para asegurar que la alarma se dispare incluso en modo Doze.
+        try {
+            if (alarmManager.canScheduleExactAlarms()) {
+                alarmManager.setExactAndAllowWhileIdle(
+                    AlarmManager.RTC_WAKEUP,
+                    triggerAtMillis,
+                    pendingIntent
+                )
+                Log.d("NotificationRepo", "⏰ Alarma exacta programada para la tarea $taskId a las $triggerAt")
+            } else {
+                Log.w("NotificationRepo", "Permiso para alarmas exactas no concedido. Usando alarma inexacta como fallback.")
+                alarmManager.set(AlarmManager.RTC_WAKEUP, triggerAtMillis, pendingIntent)
             }
-            val icon = when (action) {
-                NotificationAction.FINISH_DONE -> R.drawable.ic_check
-                else -> R.drawable.ic_snooze
-            }
-            builder.addAction(icon, actionText, pendingIntent)
+        } catch (e: SecurityException) {
+            Log.e("NotificationRepo", "Error de seguridad al programar alarma exacta.", e)
         }
+    }
 
-        postNotification(androidNotifId, builder.build())
+    override fun cancelReminder(taskId: String) {
+        val intent = Intent(context, NotificationAlarmReceiver::class.java)
+        val alarmRequestCode = taskId.hashCode()
+        val pendingIntent = PendingIntent.getBroadcast(
+            context,
+            alarmRequestCode,
+            intent,
+            PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
+        )
+        if (pendingIntent != null) {
+            alarmManager.cancel(pendingIntent)
+            Log.d("NotificationRepo", "🚫 Alarma cancelada para la tarea $taskId")
+        }
     }
 
     private fun showCriticalAlert(notification: ChapelotasNotification) {
-        val notificationIdLong = notification.id.toLongOrNull() ?: notification.id.hashCode().toLong()
-        val androidNotifId = (notificationIdLong and Int.MAX_VALUE.toLong()).toInt()
+        val androidNotifId = notification.id.hashCode()
 
         val fullScreenIntent = Intent(context, CriticalAlertActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
             putExtra("message", notification.message)
-            putExtra("event_id", notification.eventId) // eventId es String
+            putExtra("event_id", notification.eventId)
         }
 
         val fullScreenPendingIntent = PendingIntent.getActivity(
@@ -128,6 +135,69 @@ class NotificationRepositoryImpl @Inject constructor(
         postNotification(androidNotifId, builder.build())
     }
 
+    private fun showStandardNotification(notification: ChapelotasNotification) {
+        val androidNotifId = notification.eventId.hashCode()
+
+        val openAppIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            putExtra("navigation_route", "today")
+            putExtra("notification_id", androidNotifId)
+        }
+        val openAppPendingIntent = PendingIntent.getActivity(
+            context,
+            REQUEST_CODE_OPEN + androidNotifId,
+            openAppIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val builder = NotificationCompat.Builder(context, CHANNEL_GENERAL)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle("Chapelotas tiene un mensaje")
+            .setContentText(notification.message)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(notification.message))
+            .setSubText("Chapelotas")
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_EVENT)
+            .setContentIntent(openAppPendingIntent)
+            .setAutoCancel(true)
+            .setFullScreenIntent(openAppPendingIntent, true)
+
+        notification.actions.forEach { action ->
+            builder.addAction(createAction(androidNotifId, notification.eventId, action))
+        }
+
+        postNotification(androidNotifId, builder.build())
+    }
+
+    private fun createAction(androidNotifId: Int, eventId: String, action: NotificationAction): NotificationCompat.Action {
+        val intentActionString = when (action) {
+            NotificationAction.ACKNOWLEDGE -> NotificationActionReceiver.ACTION_ACKNOWLEDGE
+            NotificationAction.FINISH_DONE -> NotificationActionReceiver.ACTION_FINISH_DONE
+        }
+
+        val intent = Intent(context, NotificationActionReceiver::class.java).apply {
+            this.action = intentActionString
+            putExtra(NotificationActionReceiver.EXTRA_EVENT_ID, eventId)
+            putExtra(NotificationActionReceiver.EXTRA_ANDROID_NOTIF_ID, androidNotifId)
+        }
+
+        val requestCode = (androidNotifId + action.ordinal)
+        val pendingIntent = PendingIntent.getBroadcast(
+            context, requestCode, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val actionText = when (action) {
+            NotificationAction.ACKNOWLEDGE -> "Entendido"
+            NotificationAction.FINISH_DONE -> "Done"
+        }
+        val icon = when (action) {
+            NotificationAction.FINISH_DONE -> R.drawable.ic_check
+            else -> R.drawable.ic_snooze
+        }
+
+        return NotificationCompat.Action(icon, actionText, pendingIntent)
+    }
+
     private fun postNotification(id: Int, notification: Notification) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
@@ -136,28 +206,6 @@ class NotificationRepositoryImpl @Inject constructor(
             }
         }
         notificationManager.notify(id, notification)
-    }
-
-    private fun createActionIntent(androidNotifId: Int, notification: ChapelotasNotification, action: NotificationAction): PendingIntent {
-        val intentActionString = when (action) {
-            NotificationAction.ACKNOWLEDGE -> NotificationActionReceiver.ACTION_ACKNOWLEDGE
-            NotificationAction.FINISH_DONE -> NotificationActionReceiver.ACTION_FINISH_DONE
-        }
-
-        val intent = Intent(context, NotificationActionReceiver::class.java).apply {
-            this.action = intentActionString
-            putExtra(NotificationActionReceiver.EXTRA_EVENT_ID, notification.eventId)
-            putExtra(NotificationActionReceiver.EXTRA_ANDROID_NOTIF_ID, androidNotifId)
-        }
-
-        val requestCode = (androidNotifId + action.ordinal)
-
-        return PendingIntent.getBroadcast(
-            context,
-            requestCode,
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
     }
 
     private fun createNotificationChannels() {
@@ -195,43 +243,11 @@ class NotificationRepositoryImpl @Inject constructor(
                 vibrationPattern = longArrayOf(0, 250, 250, 250)
             }
 
-            val serviceChannel = NotificationChannel(
-                CHANNEL_SERVICE, "Servicio Chapelotas", NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = "Mantiene a Chapelotas funcionando en segundo plano."
-            }
-
             val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            manager.createNotificationChannels(listOf(generalChannel, criticalChannel, serviceChannel))
+            manager.createNotificationChannels(listOf(generalChannel, criticalChannel))
 
         } catch (e: Exception) {
             Log.e("NotificationRepo", "Error al crear canales de notificación", e)
-        }
-    }
-
-    override suspend fun scheduleNotification(notification: ChapelotasNotification) {
-        Log.d("NotificationRepo", "scheduleNotification: ${notification.message}")
-    }
-
-    override suspend fun cancelNotification(notificationId: String) {
-        try {
-            val intId = notificationId.toLongOrNull()?.toInt() ?: notificationId.hashCode()
-            notificationManager.cancel(intId)
-        } catch (e: Exception) {
-            Log.e("NotificationRepo", "Error al cancelar notificación", e)
-        }
-    }
-
-    override suspend fun isNotificationServiceRunning(): Boolean {
-        return true
-    }
-
-    override suspend fun startNotificationService() {
-        val intent = Intent(context, ChapelotasNotificationService::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            context.startForegroundService(intent)
-        } else {
-            context.startService(intent)
         }
     }
 }

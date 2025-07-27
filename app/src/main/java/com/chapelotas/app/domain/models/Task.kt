@@ -10,8 +10,30 @@ data class Task(
     val lastReminderAt: LocalDateTime? = null,
     val nextReminderAt: LocalDateTime? = null,
     val reminderCount: Int = 0,
+    val isAcknowledged: Boolean = false,
+    val isFinished: Boolean = false
+) {
+    val status: TaskStatus
+        get() {
+            val now = LocalDateTime.now()
+            val effectiveEndTime = endTime ?: scheduledTime.plusHours(1)
+            return when {
+                isFinished -> TaskStatus.FINISHED
+                // Si el tiempo ya pasó y no está terminada, SIEMPRE es DELAYED.
+                now.isAfter(effectiveEndTime) -> TaskStatus.DELAYED
+                now.isAfter(scheduledTime) -> TaskStatus.ONGOING
+                else -> TaskStatus.UPCOMING
+            }
+        }
+}
 
-    // --- LA VERDADERA FUENTE DE LA VERDAD (SIMPLIFICADA) ---
-    val isAcknowledged: Boolean = false, // ¿El usuario presionó "Entendido"?
-    val isFinished: Boolean = false      // ¿El usuario presionó "Done"?
-)
+/**
+ * Representa los posibles estados de una tarea.
+ * No existe el estado "Omitido" (MISSED), ya que Chapelotas siempre insiste.
+ */
+enum class TaskStatus {
+    UPCOMING,
+    ONGOING,
+    DELAYED,
+    FINISHED
+}

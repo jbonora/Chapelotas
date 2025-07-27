@@ -1,100 +1,92 @@
 package com.chapelotas.app.data.preferences
 
 import android.content.Context
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.preferencesDataStore
 import com.chapelotas.app.domain.models.AppSettings
 import com.chapelotas.app.domain.repositories.PreferencesRepository
 import com.google.gson.Gson
 import dagger.hilt.android.qualifiers.ApplicationContext
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
+
+// Se utiliza DataStore en lugar de SharedPreferences para un manejo de datos asíncrono y más seguro.
+private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "chapelotas_settings")
 
 @Singleton
 class PreferencesRepositoryImpl @Inject constructor(
     @ApplicationContext private val context: Context
 ) : PreferencesRepository {
 
-    private val prefs = context.getSharedPreferences("chapelotas_prefs", Context.MODE_PRIVATE)
     private val gson = Gson()
 
-    companion object {
-        private const val KEY_APP_SETTINGS = "app_settings"
-        private const val KEY_FIRST_TIME = "is_first_time_user"
-        private const val KEY_TODAY_INITIALIZED_PREFIX = "today_initialized_"
-        private const val KEY_ALARMS_CONFIGURED = "alarms_configured"
-        private const val KEY_LAST_SUCCESSFUL_RUN = "last_successful_run"
+    private object PreferenceKeys {
+        val APP_SETTINGS = stringPreferencesKey("app_settings")
+        // Aquí se podrían definir otras claves para las demás preferencias si se migraran a DataStore.
     }
 
-    // --- INICIO DE LA CORRECCIÓN ---
-
-    // 1. Creamos un "estado" interno que carga la configuración inicial.
-    private val _appSettings = MutableStateFlow(loadInitialSettings())
-
-    private fun loadInitialSettings(): AppSettings {
-        val json = prefs.getString(KEY_APP_SETTINGS, null)
-        return if (json != null) {
-            try {
-                gson.fromJson(json, AppSettings::class.java)
-            } catch (e: Exception) {
-                AppSettings()
-            }
-        } else {
-            AppSettings()
-        }
-    }
-
-    // 2. Esta función cumple el contrato "observe": devuelve el estado como un Flow.
+    // El flujo de datos se lee directamente desde DataStore, que maneja la carga y observación automáticamente.
     override fun observeAppSettings(): Flow<AppSettings> {
-        return _appSettings.asStateFlow()
-    }
-
-    // 3. Esta función cumple el contrato "save": actualiza el estado y guarda en disco.
-    override suspend fun saveAppSettings(settings: AppSettings) {
-        // Actualizamos el estado en memoria para que todos los observadores (como la UI) reaccionen al instante.
-        _appSettings.value = settings
-        // Guardamos en el disco de forma asíncrona.
-        withContext(Dispatchers.IO) {
-            val json = gson.toJson(settings)
-            prefs.edit().putString(KEY_APP_SETTINGS, json).apply()
+        return context.dataStore.data.map { preferences ->
+            val json = preferences[PreferenceKeys.APP_SETTINGS]
+            if (json != null) {
+                try {
+                    gson.fromJson(json, AppSettings::class.java)
+                } catch (e: Exception) {
+                    AppSettings() // Devuelve valores por defecto si hay un error de deserialización.
+                }
+            } else {
+                AppSettings() // Devuelve valores por defecto si no hay nada guardado.
+            }
         }
     }
 
-    // --- FIN DE LA CORRECCIÓN ---
+    // Guardar los ajustes ahora es una operación de suspensión segura.
+    override suspend fun saveAppSettings(settings: AppSettings) {
+        context.dataStore.edit { preferences ->
+            val json = gson.toJson(settings)
+            preferences[PreferenceKeys.APP_SETTINGS] = json
+        }
+    }
 
+    // Las funciones antiguas se mantienen con SharedPreferences por simplicidad y compatibilidad,
+    // pero idealmente también se migrarían a DataStore en el futuro.
+    private val legacyPrefs = context.getSharedPreferences("chapelotas_prefs", Context.MODE_PRIVATE)
 
     override suspend fun isFirstTimeUser(): Boolean {
-        return prefs.getBoolean(KEY_FIRST_TIME, true)
+        return legacyPrefs.getBoolean("is_first_time_user", true)
     }
 
     override suspend fun isTodayInitialized(date: String): Boolean {
-        return prefs.getBoolean("$KEY_TODAY_INITIALIZED_PREFIX$date", false)
+        return legacyPrefs.getBoolean("today_initialized_$date", false)
     }
 
     override suspend fun setTodayInitialized(date: String) {
-        prefs.edit().putBoolean("$KEY_TODAY_INITIALIZED_PREFIX$date", true).apply()
+        legacyPrefs.edit().putBoolean("today_initialized_$date", true).apply()
     }
 
     override suspend fun areAlarmsConfigured(): Boolean {
-        return prefs.getBoolean(KEY_ALARMS_CONFIGURED, false)
+        return legacyPrefs.getBoolean("alarms_configured", false)
     }
 
     override suspend fun setAlarmsConfigured(configured: Boolean) {
-        prefs.edit().putBoolean(KEY_ALARMS_CONFIGURED, configured).apply()
+        legacyPrefs.edit().putBoolean("alarms_configured", configured).apply()
     }
 
     override suspend fun getLastSuccessfulRun(): Long? {
-        val timestamp = prefs.getLong(KEY_LAST_SUCCESSFUL_RUN, -1)
+        val timestamp = legacyPrefs.getLong("last_successful_run", -1)
         return if (timestamp == -1L) null else timestamp
     }
 
     override suspend fun setLastSuccessfulRun(timestamp: Long) {
-        prefs.edit()
-            .putLong(KEY_LAST_SUCCESSFUL_RUN, timestamp)
-            .putBoolean(KEY_FIRST_TIME, false)
+        legacyPrefs.edit()
+            .putLong("last_successful_run", timestamp)
+            .putBoolean("is_first_time_user", false)
             .apply()
     }
 }

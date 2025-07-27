@@ -4,10 +4,24 @@ import com.chapelotas.app.domain.models.AppSettings
 import kotlinx.coroutines.flow.Flow
 
 /**
- * Repositorio para gestionar las preferencias
- * Define el contrato sin exponer detalles de implementación
+ * Define el contrato para gestionar las preferencias y configuraciones de la aplicación.
+ * Abstrae los detalles de cómo y dónde se guarda la configuración (ej. SharedPreferences).
  */
 interface PreferencesRepository {
+
+    /**
+     * Observa los cambios en la configuración de la aplicación en tiempo real.
+     * @return Un Flow que emite el objeto AppSettings cada vez que cambia.
+     */
+    fun observeAppSettings(): Flow<AppSettings>
+
+    /**
+     * Guarda un nuevo objeto de configuración.
+     * @param settings El nuevo objeto AppSettings a persistir.
+     */
+    suspend fun saveAppSettings(settings: AppSettings)
+
+    // --- Otras preferencias específicas ---
 
     suspend fun isFirstTimeUser(): Boolean
     suspend fun isTodayInitialized(date: String): Boolean
@@ -16,12 +30,4 @@ interface PreferencesRepository {
     suspend fun setAlarmsConfigured(configured: Boolean)
     suspend fun getLastSuccessfulRun(): Long?
     suspend fun setLastSuccessfulRun(timestamp: Long)
-
-    // --- INICIO DE LA CORRECCIÓN ---
-    // Este es el contrato correcto:
-    // 1. Un método para OBSERVAR los cambios en la configuración.
-    fun observeAppSettings(): Flow<AppSettings>
-    // 2. Un método para GUARDAR la nueva configuración.
-    suspend fun saveAppSettings(settings: AppSettings)
-    // --- FIN DE LA CORRECCIÓN ---
 }
