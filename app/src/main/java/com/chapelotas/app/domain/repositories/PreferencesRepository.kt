@@ -2,6 +2,7 @@ package com.chapelotas.app.domain.repositories
 
 import com.chapelotas.app.domain.models.AppSettings
 import kotlinx.coroutines.flow.Flow
+import java.time.LocalDateTime
 
 /**
  * Define el contrato para gestionar las preferencias y configuraciones de la aplicación.
@@ -30,4 +31,10 @@ interface PreferencesRepository {
     suspend fun setAlarmsConfigured(configured: Boolean)
     suspend fun getLastSuccessfulRun(): Long?
     suspend fun setLastSuccessfulRun(timestamp: Long)
+
+    // --- FUNCIONES AÑADIDAS ---
+    suspend fun setFinalHuaweiAlarmTime(dateTime: LocalDateTime)
+    fun getFinalHuaweiAlarmTime(): Flow<LocalDateTime?>
+    suspend fun clearFinalHuaweiAlarmTime()
+    // --- FIN DE FUNCIONES AÑADIDAS ---
 }

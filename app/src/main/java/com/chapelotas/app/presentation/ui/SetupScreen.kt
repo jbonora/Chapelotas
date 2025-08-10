@@ -11,20 +11,18 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.chapelotas.app.R
 import com.chapelotas.app.battery.BatteryProtectionManager
 import com.chapelotas.app.presentation.ui.SettingsScreen
 import com.chapelotas.app.presentation.viewmodels.SetupStep
 import com.chapelotas.app.presentation.viewmodels.SetupViewModel
 
-/**
- * Contenedor principal para todo el flujo de configuración.
- * Observa el estado del ViewModel y muestra el paso actual.
- */
 @Composable
 fun SetupScreen(
     onSetupComplete: () -> Unit,
@@ -33,58 +31,59 @@ fun SetupScreen(
     val uiState by viewModel.uiState.collectAsState()
     val context = LocalContext.current
 
-    // Launcher para el permiso de calendario
     val calendarPermissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission(),
-        onResult = { isGranted ->
+        contract = ActivityResultContracts.RequestMultiplePermissions(),
+        onResult = { permissions ->
             viewModel.nextStep()
         }
     )
 
-    // Launcher para el permiso de notificaciones
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission(),
-        onResult = { isGranted ->
-            viewModel.nextStep()
-        }
+        onResult = { viewModel.nextStep() }
     )
 
-    // Efecto que se dispara cuando el estado cambia a "Finished"
-    LaunchedEffect(uiState.currentStep) {
-        if (uiState.currentStep == SetupStep.Finished) {
+    // Este LaunchedEffect ahora observa correctamente la bandera 'isFinished'.
+    LaunchedEffect(uiState.isFinished) {
+        if (uiState.isFinished) {
             onSetupComplete()
         }
     }
 
-    // AnimatedContent hace que la transición entre pasos sea suave
     AnimatedContent(targetState = uiState.currentStep, label = "SetupStepAnimation") { step ->
-        // Si el paso es la personalización de ajustes, muestra la pantalla de Settings.
+        // La pantalla de personalización se maneja correctamente.
         if (step == SetupStep.CustomizingSettings) {
             SettingsScreen(
                 onSetupComplete = { viewModel.finishSetup() }
             )
         } else {
-            // Para todos los demás pasos, muestra el contenedor estándar.
             Box(modifier = Modifier.fillMaxSize()) {
                 when (step) {
                     SetupStep.Welcome -> WelcomeStep(onNext = { viewModel.nextStep() })
 
                     SetupStep.CalendarPermission -> PermissionStep(
-                        title = "Permiso de Calendario",
-                        text = "Para poder recordarte tus eventos, necesito permiso para leer el calendario de tu teléfono. Sin esto, no puedo funcionar.",
-                        buttonText = "Dar Permiso de Calendario",
-                        onAction = { calendarPermissionLauncher.launch(Manifest.permission.READ_CALENDAR) }
+                        title = stringResource(id = R.string.setup_calendar_permission_title),
+                        text = stringResource(id = R.string.setup_calendar_permission_message),
+                        buttonText = stringResource(id = R.string.setup_calendar_permission_button),
+                        onAction = {
+                            calendarPermissionLauncher.launch(
+                                arrayOf(
+                                    Manifest.permission.READ_CALENDAR,
+                                    Manifest.permission.WRITE_CALENDAR
+                                )
+                            )
+                        }
                     )
 
                     SetupStep.NotificationPermission -> PermissionStep(
-                        title = "Permiso de Notificaciones",
-                        text = "También necesito permiso para enviarte notificaciones. De lo contrario, mis recordatorios no te llegarán.",
-                        buttonText = "Dar Permiso de Notificaciones",
+                        title = stringResource(id = R.string.setup_notification_permission_title),
+                        text = stringResource(id = R.string.setup_notification_permission_message),
+                        buttonText = stringResource(id = R.string.setup_notification_permission_button),
                         onAction = {
                             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                                 notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
                             } else {
-                                viewModel.nextStep() // En versiones antiguas no se necesita, avanza directamente.
+                                viewModel.nextStep()
                             }
                         }
                     )
@@ -106,15 +105,12 @@ fun SetupScreen(
                     SetupStep.FinalSettings -> FinalSettingsStep(
                         userName = uiState.userName,
                         onUseDefaults = { viewModel.finishSetup() },
-                        // --- LA LÍNEA CORREGIDA ---
-                        // Ahora, al personalizar, llamamos a la función correcta.
                         onCustomize = { viewModel.startCustomization() }
-                        // -------------------------
                     )
 
-                    SetupStep.Finished, SetupStep.CustomizingSettings -> {
-                        // Pantalla vacía mientras se navega o se muestra la otra pantalla.
-                    }
+                    // La referencia a 'Finished' ha sido eliminada.
+                    // El caso 'CustomizingSettings' ya se maneja arriba.
+                    SetupStep.CustomizingSettings -> { /* No hacer nada aquí */ }
                 }
             }
         }
@@ -122,14 +118,12 @@ fun SetupScreen(
 }
 
 
-// --- COMPONENTES VISUALES PARA CADA PASO (SIN CAMBIOS) ---
-
 @Composable
 private fun WelcomeStep(onNext: () -> Unit) {
     StepContainer(
-        title = "¡Bienvenido a Chapelotas!",
-        text = "Tu nuevo asistente personal (un poco sarcástico) está listo para empezar. Vamos a configurar algunas cosas rápidas.",
-        buttonText = "Comenzar",
+        title = stringResource(id = R.string.setup_welcome_title),
+        text = stringResource(id = R.string.setup_welcome_message),
+        buttonText = stringResource(id = R.string.setup_welcome_button),
         onAction = onNext
     )
 }
@@ -142,9 +136,9 @@ private fun PermissionStep(title: String, text: String, buttonText: String, onAc
 @Composable
 private fun BatteryStep(onNext: () -> Unit) {
     StepContainer(
-        title = "Optimización de Batería",
-        text = "Algunos teléfonos son muy agresivos para ahorrar batería y podrían 'dormirme'. Para asegurar que mis recordatorios lleguen siempre a tiempo, te guiaré para que me agregues a la lista de 'aplicaciones protegidas'.",
-        buttonText = "Configurar Batería",
+        title = stringResource(id = R.string.setup_battery_optimization_title),
+        text = stringResource(id = R.string.setup_battery_optimization_message),
+        buttonText = stringResource(id = R.string.setup_battery_optimization_button),
         onAction = onNext
     )
 }
@@ -152,15 +146,15 @@ private fun BatteryStep(onNext: () -> Unit) {
 @Composable
 private fun NameInputStep(name: String, onNameChange: (String) -> Unit, onNext: () -> Unit) {
     StepContainer(
-        title = "Un último detalle...",
-        text = "¿Cómo te llamas? Esto hará que los recordatorios sean un poco más personales.",
-        buttonText = "Siguiente",
+        title = stringResource(id = R.string.setup_name_input_title),
+        text = stringResource(id = R.string.setup_name_input_message),
+        buttonText = stringResource(id = R.string.next),
         onAction = onNext,
         content = {
             OutlinedTextField(
                 value = name,
                 onValueChange = onNameChange,
-                label = { Text("Tu nombre") },
+                label = { Text(stringResource(id = R.string.setup_name_input_label)) },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth()
             )
@@ -182,14 +176,17 @@ private fun FinalSettingsStep(
         verticalArrangement = Arrangement.Center
     ) {
         Text(
-            text = "Ajustes de Recordatorios",
+            text = stringResource(id = R.string.setup_final_settings_title),
             fontSize = 24.sp,
             fontWeight = FontWeight.Bold,
             textAlign = TextAlign.Center
         )
         Spacer(Modifier.height(16.dp))
         Text(
-            text = "¡Ya casi terminamos, ${userName.ifBlank { "crack" }}! Puedo empezar a funcionar con mis ajustes recomendados, o puedes personalizarlos ahora. Siempre podrás cambiarlos más tarde desde el menú de Configuración.",
+            text = stringResource(
+                id = R.string.setup_final_settings_message,
+                userName.ifBlank { stringResource(id = R.string.setup_user_name_placeholder) }
+            ),
             textAlign = TextAlign.Center
         )
         Spacer(Modifier.height(32.dp))
@@ -197,14 +194,14 @@ private fun FinalSettingsStep(
             onClick = onUseDefaults,
             modifier = Modifier.fillMaxWidth()
         ) {
-            Text("Usar Ajustes por Defecto y Empezar")
+            Text(stringResource(id = R.string.setup_final_settings_default_button))
         }
         Spacer(Modifier.height(16.dp))
         OutlinedButton(
             onClick = onCustomize,
             modifier = Modifier.fillMaxWidth()
         ) {
-            Text("Personalizar Ahora")
+            Text(stringResource(id = R.string.setup_final_settings_customize_button))
         }
     }
 }

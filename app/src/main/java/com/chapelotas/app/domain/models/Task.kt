@@ -1,25 +1,63 @@
 package com.chapelotas.app.domain.models
 
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.persistentListOf
 import java.time.LocalDateTime
+
+object LocationContext {
+    const val DEFAULT = "default"
+    const val OFFICE = "office"
+    const val NEARBY = "nearby"
+    const val FAR = "far"
+}
+
+enum class TaskType {
+    EVENT,
+    TODO
+}
+
+enum class Sender {
+    CHAPELOTAS,
+    USUARIO
+}
+
+data class ConversationEntry(
+    val sender: Sender,
+    val message: String
+)
 
 data class Task(
     val id: String,
     val title: String,
     val scheduledTime: LocalDateTime,
     val endTime: LocalDateTime? = null,
+    val taskType: TaskType = TaskType.EVENT,
     val lastReminderAt: LocalDateTime? = null,
     val nextReminderAt: LocalDateTime? = null,
     val reminderCount: Int = 0,
     val isAcknowledged: Boolean = false,
-    val isFinished: Boolean = false
+    val isFinished: Boolean = false,
+    val calendarEventId: Long? = null,
+    val isFromCalendar: Boolean = false,
+    val isStarted: Boolean = false,
+    val isRecurring: Boolean = false,
+    val locationContext: String = LocationContext.DEFAULT,
+    val travelTimeMinutes: Int = 0,
+    // --- CAMBIO CLAVE: Usamos una lista inmutable para mayor estabilidad ---
+    val conversationLog: ImmutableList<ConversationEntry> = persistentListOf(),
+    val unreadMessageCount: Int = 0
 ) {
+    val isTodo: Boolean
+        get() = taskType == TaskType.TODO
+
     val status: TaskStatus
         get() {
             val now = LocalDateTime.now()
             val effectiveEndTime = endTime ?: scheduledTime.plusHours(1)
             return when {
                 isFinished -> TaskStatus.FINISHED
-                // Si el tiempo ya pasó y no está terminada, SIEMPRE es DELAYED.
+                isTodo && isStarted -> TaskStatus.IN_PROGRESS
+                isTodo -> TaskStatus.TODO
                 now.isAfter(effectiveEndTime) -> TaskStatus.DELAYED
                 now.isAfter(scheduledTime) -> TaskStatus.ONGOING
                 else -> TaskStatus.UPCOMING
@@ -27,13 +65,11 @@ data class Task(
         }
 }
 
-/**
- * Representa los posibles estados de una tarea.
- * No existe el estado "Omitido" (MISSED), ya que Chapelotas siempre insiste.
- */
 enum class TaskStatus {
     UPCOMING,
     ONGOING,
     DELAYED,
-    FINISHED
+    FINISHED,
+    TODO,
+    IN_PROGRESS
 }

@@ -12,6 +12,8 @@ import com.google.gson.Gson
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -27,7 +29,8 @@ class PreferencesRepositoryImpl @Inject constructor(
 
     private object PreferenceKeys {
         val APP_SETTINGS = stringPreferencesKey("app_settings")
-        // Aquí se podrían definir otras claves para las demás preferencias si se migraran a DataStore.
+        // --- CLAVE AÑADIDA ---
+        val FINAL_HUAWEI_ALARM_TIME = stringPreferencesKey("final_huawei_alarm_time")
     }
 
     // El flujo de datos se lee directamente desde DataStore, que maneja la carga y observación automáticamente.
@@ -53,6 +56,32 @@ class PreferencesRepositoryImpl @Inject constructor(
             preferences[PreferenceKeys.APP_SETTINGS] = json
         }
     }
+
+    // --- IMPLEMENTACIÓN DE FUNCIONES AÑADIDAS ---
+    override suspend fun setFinalHuaweiAlarmTime(dateTime: LocalDateTime) {
+        context.dataStore.edit { preferences ->
+            preferences[PreferenceKeys.FINAL_HUAWEI_ALARM_TIME] = dateTime.format(DateTimeFormatter.ISO_LOCAL_DATE_TIME)
+        }
+    }
+
+    override fun getFinalHuaweiAlarmTime(): Flow<LocalDateTime?> {
+        return context.dataStore.data.map { preferences ->
+            preferences[PreferenceKeys.FINAL_HUAWEI_ALARM_TIME]?.let {
+                try {
+                    LocalDateTime.parse(it, DateTimeFormatter.ISO_LOCAL_DATE_TIME)
+                } catch (e: Exception) {
+                    null
+                }
+            }
+        }
+    }
+
+    override suspend fun clearFinalHuaweiAlarmTime() {
+        context.dataStore.edit { preferences ->
+            preferences.remove(PreferenceKeys.FINAL_HUAWEI_ALARM_TIME)
+        }
+    }
+    // --- FIN DE LA IMPLEMENTACIÓN ---
 
     // Las funciones antiguas se mantienen con SharedPreferences por simplicidad y compatibilidad,
     // pero idealmente también se migrarían a DataStore en el futuro.

@@ -5,12 +5,9 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import android.content.Context
 
-/**
- * Base de datos principal de Chapelotas V2
- * Por ahora solo tiene la tabla de tasks
- */
 @Database(
     entities = [TaskEntity::class],
+    // --- LÍNEA CORREGIDA (DE VUELTA A 1) ---
     version = 1,
     exportSchema = false
 )
@@ -29,7 +26,7 @@ abstract class TaskDatabase : RoomDatabase() {
                     TaskDatabase::class.java,
                     "chapelotas_v2.db"
                 )
-                    .fallbackToDestructiveMigration() // Por ahora, en producción usar migraciones
+                    .fallbackToDestructiveMigration()
                     .build()
                 INSTANCE = instance
                 instance

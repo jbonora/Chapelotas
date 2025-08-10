@@ -1,35 +1,41 @@
 package com.chapelotas.app.domain.models
 
-data class AppSettings(
-    // Valores por defecto que se usarán la primera vez que se instale la app.
+// --- NOMBRES DE PERFILES SIMPLIFICADOS ---
+object InsistenceProfile {
+    const val NORMAL = "Normal" // Usa el sonido de alerta principal
+    const val MEDIUM = "Medio"
+    const val LOW = "Bajo"
+}
 
+data class AppSettings(
     val userName: String = "Juancito",
-    val workStartTime: String = "09:00",
-    val workEndTime: String = "18:00",
+    val workStartTime: String = "08:00",
+    val workEndTime: String = "23:00",
     val workHours24h: Boolean = true,
+    val lunchStartTime: String = "13:00",
+    val lunchEndTime: String = "14:00",
+    val dinnerStartTime: String = "20:00",
+    val dinnerEndTime: String = "21:00",
+
     val firstReminder: Int = 60,
     val secondReminder: Int = 30,
     val thirdReminder: Int = 10,
 
-    // --- LÓGICA DE INTERVALOS REFINADA SEGÚN TU PROPUESTA ---
-
-    /**
-     * Intervalo de "no molestar tanto".
-     * Se usa para tareas EN CURSO que ya han sido ACEPTADAS.
-     */
     val lowUrgencyInterval: Int = 20,
-
-    /**
-     * Tu "Intervalo de Alta Insistencia".
-     * Se usa para:
-     * 1. Tareas EN CURSO que NO han sido aceptadas.
-     * 2. Tareas PASADAS que NO han sido terminadas (demoradas).
-     */
     val highUrgencyInterval: Int = 1,
 
-    // `missedInterval` y `ongoingInterval` han sido reemplazados por los dos de arriba.
-    // ----------------------------------------------------
+    val insistenceSoundProfile: String = InsistenceProfile.LOW,
 
     val sarcasticMode: Boolean = true,
-    val aiMode: Boolean = false
+    // --- LÍNEA AÑADIDA ---
+    val personalityProfile: String = "sarcastic", // Define el perfil de personalidad a usar
+
+    val autoCreateAlarm: Boolean = true,
+    val alarmOffsetMinutes: Int = 90, // 1:30 hs por defecto
+
+    val snoozeMinutes: Int = 10,
+
+    val travelTimeNearbyMinutes: Int = 15, // Tiempo de viaje para "Cerca"
+    // --- VALOR ACTUALIZADO ---
+    val travelTimeFarMinutes: Int = 40      // Tiempo de viaje para "Lejos"
 )

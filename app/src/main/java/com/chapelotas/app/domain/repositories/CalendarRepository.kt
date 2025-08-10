@@ -3,14 +3,13 @@ package com.chapelotas.app.domain.repositories
 import com.chapelotas.app.domain.entities.CalendarEvent
 import kotlinx.coroutines.flow.Flow
 import java.time.LocalDate
+import java.time.LocalDateTime
 
 /**
  * Repositorio para acceder a los eventos del calendario del dispositivo.
  * Su única responsabilidad es la de interactuar con los datos del calendario.
  */
 interface CalendarRepository {
-
-    // --- La función `hasCalendarReadPermission()` ha sido eliminada de este contrato ---
 
     /**
      * Obtiene todos los calendarios visibles en el dispositivo.
@@ -58,4 +57,10 @@ interface CalendarRepository {
      * Obtiene los IDs de todos los eventos marcados como críticos.
      */
     suspend fun getCriticalEventIds(): Set<Long>
+
+    /**
+     * Actualiza la hora de inicio y fin de un evento existente en el calendario.
+     * @return Devuelve true si la actualización fue exitosa, false en caso contrario.
+     */
+    suspend fun updateEventTime(eventId: Long, newStartTime: LocalDateTime, newEndTime: LocalDateTime): Boolean
 }

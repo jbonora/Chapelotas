@@ -1,0 +1,63 @@
+{
+  "sarcastic": {
+    "displayName": "Sarcástico",
+    "description": "Tu asistente con un agudo sentido de la ironía. No esperes cumplidos.",
+    "alarm_greeting": {
+      "options": [
+        "Oh, mira quién decidió despertar...",
+        "Arriba, campeón. El mundo no se va a conquistar solo.",
+        "¿Listo para otro día de gloriosa productividad? Yo tampoco.",
+        "Buenos días, {USER_NAME}. O eso dicen.",
+        "Que la cafeína te acompañe, porque la motivación ya se fue de vacaciones."
+      ]
+    },
+    "upcoming_reminder": {
+      "unacknowledged": [
+        "En {MINUTES} min empieza '{TASK_NAME}'. A ver si te ponés las pilas.",
+        "Che, {USER_NAME}, en {MINUTES} minutos tenés que hacer '{TASK_NAME}'. No digas que no te avisé.",
+        "Tic, toc... Faltan {MINUTES} minutos para '{TASK_NAME}'. La procrastinación puede esperar, ¿o no?"
+      ],
+      "acknowledged": [
+        "Ya sé que me dijiste que sí para '{TASK_NAME}', pero te lo recuerdo por si tu memoria es como la de un pez. Faltan {MINUTES} min.",
+        "Solo un recordatorio amistoso (y para nada insistente) de que '{TASK_NAME}' es en {MINUTES} minutos.",
+        "Confío en que te acordabas de '{TASK_NAME}' en {MINUTES} minutos, pero mi trabajo es dudar de tu capacidad de retención."
+      ]
+    },
+    "ongoing_reminder": {
+      "unacknowledged": [
+        "Ya deberías estar haciendo '{TASK_NAME}'... ¿Vas a hacer algo o no, {USER_NAME}?",
+        "Hola, {USER_NAME}. Te informo que '{TASK_NAME}' ya empezó. De nada.",
+        "Notificación de servicio público: '{TASK_NAME}' ha comenzado. Puedes proceder a ignorar esto también."
+      ],
+      "acknowledged": [
+        "Dale que va... A ver si terminamos con '{TASK_NAME}' de una vez por todas.",
+        "Seguimos con '{TASK_NAME}', ¿verdad? O solo estamos contemplando la existencia...",
+        "Solo para que conste, la tarea '{TASK_NAME}' sigue activa. Sin presiones."
+      ]
+    },
+    "delayed_reminder": {
+      "unacknowledged": [
+        "{USER_NAME}, la tarea '{TASK_NAME}' ya pasó y ni la miraste. Un desastre.",
+        "Felicitaciones, has desbloqueado el logro 'Ignorar Completamente una Tarea'. El trofeo es imaginario, como tu interés en '{TASK_NAME}'.",
+        "'{TASK_NAME}' era hace un rato. Pero no te preocupes, el tiempo es solo una construcción social, ¿no?"
+      ],
+      "acknowledged": [
+        "¿Ya te rendiste o seguís con '{TASK_NAME}'? Definí, campeón.",
+        "La tarea '{TASK_NAME}' está oficialmente en tiempo suplementario. ¿Jugamos al alargue?",
+        "Seguimos demorados con '{TASK_NAME}'. A este paso, le gana una tortuga."
+      ]
+    },
+    "action_confirmation": {
+      "acknowledge": [
+        "Entendido, {USER_NAME}. Ya me encargo yo.",
+        "Ok, jefe. Marcado como 'entendido'. Lo que sea que eso signifique.",
+        "Recibido. Ahora intentá acordarte."
+      ],
+      "finish": [
+        "¡Aleluya! Tarea '{TASK_NAME}' finalizada. No pensé que viviría para verlo.",
+        "Bien hecho, supongo. Una menos.",
+        "Ok, {USER_NAME}, tarea terminada. ¿Ahora qué? ¿Un helado?"
+      ]
+    }
+  }
+}

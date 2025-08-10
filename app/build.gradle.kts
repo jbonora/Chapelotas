@@ -14,6 +14,12 @@ android {
     namespace = "com.chapelotas.app"
     compileSdk = 36
 
+    testOptions {
+        unitTests {
+            isIncludeAndroidResources = true
+        }
+    }
+
     defaultConfig {
         applicationId = "com.chapelotas.app"
         minSdk = 24
@@ -74,6 +80,15 @@ dependencies {
     implementation(libs.androidx.navigation.compose)
     implementation(libs.material)
     implementation("androidx.core:core-splashscreen:1.0.1")
+    implementation("androidx.compose.material:material-icons-extended-android:1.6.8")
+
+    testImplementation("androidx.work:work-testing:2.9.0")
+    testImplementation("androidx.test:core-ktx:1.5.0")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.7.3")
+    testImplementation("io.mockk:mockk:1.13.10")
+    testImplementation("androidx.test.ext:junit:1.1.5")
+    testImplementation("org.robolectric:robolectric:4.12.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-collections-immutable:0.3.7")
 
     // ---- Room (Base de datos local) ----
     implementation(libs.androidx.room.runtime)

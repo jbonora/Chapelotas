@@ -8,22 +8,16 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
+import java.time.LocalDate
 import javax.inject.Inject
 
-/**
- * ViewModel para la pantalla de Debug.
- * Expone la "fuente de verdad" sin filtros.
- */
 @HiltViewModel
-class DebugViewModel @Inject constructor(
-    taskRepository: TaskRepository
+class AlarmViewModel @Inject constructor(
+    private val taskRepository: TaskRepository
 ) : ViewModel() {
 
-    /**
-     * Un Flow que observa TODAS las tareas en la base de datos, ordenadas por fecha.
-     * Se actualiza automáticamente si algo cambia en la BD.
-     */
-    val allTasks: StateFlow<List<Task>> = taskRepository.observeAllTasks()
+    val todayTasks: StateFlow<List<Task>> = taskRepository
+        .observeTasksForDate(LocalDate.now())
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),

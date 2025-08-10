@@ -11,6 +11,7 @@ import android.os.Bundle
 import android.os.PowerManager
 import android.os.VibrationEffect
 import android.os.Vibrator
+import android.os.VibratorManager
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -25,11 +26,18 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
+import com.chapelotas.app.R
 import com.chapelotas.app.data.notifications.NotificationActionReceiver
+import com.chapelotas.app.di.Constants
 import com.chapelotas.app.presentation.ui.theme.ChapelotasTheme
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
@@ -40,7 +48,6 @@ class CriticalAlertActivity : ComponentActivity() {
     private var ringtone: Ringtone? = null
     private var vibrator: Vibrator? = null
     private var wakeLock: PowerManager.WakeLock? = null
-    private var proximityWakeLock: PowerManager.WakeLock? = null
     private val activityScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var eventId: String = ""
 
@@ -49,10 +56,9 @@ class CriticalAlertActivity : ComponentActivity() {
 
         setupWindow()
         acquireWakeLocks()
-        setupAsIncomingCall()
 
-        val message = intent.getStringExtra("message") ?: "¡EVENTO CRÍTICO!"
-        eventId = intent.getStringExtra("event_id") ?: "0"
+        val message = intent.getStringExtra(Constants.EXTRA_NOTIFICATION_MESSAGE) ?: getString(R.string.critical_alert_default_message)
+        eventId = intent.getStringExtra(Constants.EXTRA_EVENT_ID) ?: "0"
 
         startAlarm()
 
@@ -85,10 +91,17 @@ class CriticalAlertActivity : ComponentActivity() {
     }
 
     private fun setupWindow() {
+        // --- CÓDIGO ACTUALIZADO PARA FULLSCREEN Y GESTIÓN DE LA PANTALLA ---
+        // Esto reemplaza FLAG_FULLSCREEN y otros métodos obsoletos.
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        WindowInsetsControllerCompat(window, window.decorView).let { controller ->
+            controller.hide(WindowInsetsCompat.Type.systemBars())
+            controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        }
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
             setShowWhenLocked(true)
             setTurnScreenOn(true)
-
             val keyguardManager = getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
             keyguardManager.requestDismissKeyguard(this, null)
         } else {
@@ -100,43 +113,21 @@ class CriticalAlertActivity : ComponentActivity() {
             )
         }
 
-        window.addFlags(
-            WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
-                    WindowManager.LayoutParams.FLAG_ALLOW_LOCK_WHILE_SCREEN_ON or
-                    WindowManager.LayoutParams.FLAG_FULLSCREEN
-        )
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
     }
 
     private fun acquireWakeLocks() {
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
-
+        // --- CÓDIGO ACTUALIZADO PARA WAKELOCK ---
+        // Se mantiene el WakeLock, ya que para este caso de uso (despertar la pantalla)
+        // sigue siendo la forma recomendada, aunque los flags antiguos se marcan como obsoletos.
+        // La implementación actual es correcta para la compatibilidad.
+        @Suppress("DEPRECATION")
         wakeLock = powerManager.newWakeLock(
-            PowerManager.FULL_WAKE_LOCK or
-                    PowerManager.ACQUIRE_CAUSES_WAKEUP or
-                    PowerManager.ON_AFTER_RELEASE,
+            PowerManager.FULL_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP,
             "Chapelotas::CriticalAlertWakeLock"
         ).apply {
             acquire(60000) // 60 segundos máximo
-        }
-
-        if (powerManager.isWakeLockLevelSupported(PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK)) {
-            proximityWakeLock = powerManager.newWakeLock(
-                PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK,
-                "Chapelotas::ProximityWakeLock"
-            ).apply {
-                acquire(60000)
-            }
-        }
-    }
-
-    private fun setupAsIncomingCall() {
-        val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
-        val previousMode = audioManager.mode
-        audioManager.mode = AudioManager.MODE_RINGTONE
-
-        activityScope.launch {
-            delay(500) // Dar tiempo para que se configure
-            audioManager.mode = previousMode
         }
     }
 
@@ -148,25 +139,19 @@ class CriticalAlertActivity : ComponentActivity() {
     }
 
     private fun releaseWakeLocks() {
-        wakeLock?.let {
-            if (it.isHeld) it.release()
-        }
-        proximityWakeLock?.let {
-            if (it.isHeld) it.release()
-        }
+        wakeLock?.takeIf { it.isHeld }?.release()
     }
 
     private fun handleAccept() {
         val intent = Intent(this, NotificationActionReceiver::class.java).apply {
-            action = NotificationActionReceiver.ACTION_FINISH_DONE
-            putExtra(NotificationActionReceiver.EXTRA_EVENT_ID, eventId)
+            action = Constants.ACTION_FINISH_DONE
+            putExtra(Constants.EXTRA_EVENT_ID, eventId)
         }
         sendBroadcast(intent)
         finishAndRemoveTask()
     }
 
     private fun handleDismiss() {
-        // Simplemente cierra la actividad sin cambiar el estado de la tarea
         finishAndRemoveTask()
     }
 
@@ -179,20 +164,24 @@ class CriticalAlertActivity : ComponentActivity() {
         try {
             val alarmUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
             ringtone = RingtoneManager.getRingtone(applicationContext, alarmUri)
-            val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
-            val maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_RING)
-            audioManager.setStreamVolume(AudioManager.STREAM_RING, maxVolume, 0)
             ringtone?.play()
         } catch (e: Exception) {
             e.printStackTrace()
         }
 
-        vibrator = getSystemService(VIBRATOR_SERVICE) as Vibrator
-        val vibrationPattern = longArrayOf(0, 1000, 1000)
+        // --- CÓDIGO ACTUALIZADO PARA EL VIBRADOR ---
+        // Reemplaza el método obsoleto de obtener el servicio.
+        vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val vibratorManager = getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
+            vibratorManager.defaultVibrator
+        } else {
+            @Suppress("DEPRECATION")
+            getSystemService(VIBRATOR_SERVICE) as Vibrator
+        }
 
+        val vibrationPattern = longArrayOf(0, 1000, 1000)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val effect = VibrationEffect.createWaveform(vibrationPattern, 0)
-            vibrator?.vibrate(effect)
+            vibrator?.vibrate(VibrationEffect.createWaveform(vibrationPattern, 0))
         } else {
             @Suppress("DEPRECATION")
             vibrator?.vibrate(vibrationPattern, 0)
@@ -227,13 +216,13 @@ fun CriticalCallScreen(
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Spacer(modifier = Modifier.height(64.dp))
                 Text(
-                    text = "Chapelotas",
+                    text = stringResource(id = R.string.app_name),
                     fontSize = 28.sp,
                     color = Color.White
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    text = "Alerta Crítica",
+                    text = stringResource(id = R.string.critical_alert_title),
                     fontSize = 18.sp,
                     color = Color.Gray
                 )
@@ -260,10 +249,10 @@ fun CriticalCallScreen(
                         shape = CircleShape,
                         colors = ButtonDefaults.buttonColors(containerColor = Color.Red)
                     ) {
-                        Icon(Icons.Default.Close, contentDescription = "Ignorar", tint = Color.White, modifier = Modifier.size(36.dp))
+                        Icon(Icons.Default.Close, contentDescription = stringResource(id = R.string.critical_alert_reject), tint = Color.White, modifier = Modifier.size(36.dp))
                     }
                     Spacer(modifier = Modifier.height(8.dp))
-                    Text("Ignorar", color = Color.White)
+                    Text(stringResource(id = R.string.critical_alert_reject), color = Color.White)
                 }
 
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -273,10 +262,10 @@ fun CriticalCallScreen(
                         shape = CircleShape,
                         colors = ButtonDefaults.buttonColors(containerColor = Color.Green)
                     ) {
-                        Icon(Icons.Default.Call, contentDescription = "Entendido", tint = Color.White, modifier = Modifier.size(36.dp))
+                        Icon(Icons.Default.Call, contentDescription = stringResource(id = R.string.critical_alert_accept), tint = Color.White, modifier = Modifier.size(36.dp))
                     }
                     Spacer(modifier = Modifier.height(8.dp))
-                    Text("Entendido", color = Color.White)
+                    Text(stringResource(id = R.string.critical_alert_accept), color = Color.White)
                 }
             }
         }

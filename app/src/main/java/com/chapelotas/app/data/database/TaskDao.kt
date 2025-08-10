@@ -2,18 +2,11 @@ package com.chapelotas.app.data.database
 
 import androidx.room.*
 import kotlinx.coroutines.flow.Flow
-import java.time.LocalDate
-import java.time.ZoneId
 
-/**
- * Data Access Object (DAO) para las tareas.
- * Define todas las operaciones de base de datos (consultas SQL) para la entidad TaskEntity.
- * Es la única clase que habla directamente con la tabla "tasks".
- */
 @Dao
 interface TaskDao {
 
-    // --- OPERACIONES BÁSICAS DE ESCRITURA ---
+    // --- OPERACIONES DE INSERCIÓN Y ACTUALIZACIÓN ---
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(task: TaskEntity): Long
@@ -24,9 +17,16 @@ interface TaskDao {
     @Update
     suspend fun update(task: TaskEntity)
 
+    // --- OPERACIONES DE ELIMINACIÓN ---
+
     @Query("DELETE FROM tasks WHERE id = :taskId")
     suspend fun deleteById(taskId: String)
 
+    @Query("DELETE FROM tasks WHERE isFinished = 1 AND updatedAt < :beforeDate")
+    suspend fun deleteOldCompletedTasks(beforeDate: Long)
+
+    @Query("DELETE FROM tasks WHERE isFinished = 0 AND scheduledTime < :todayStartMillis")
+    suspend fun deleteUnfinishedTasksBefore(todayStartMillis: Long)
 
     // --- OPERACIONES DE LECTURA (QUERIES) ---
 
@@ -36,10 +36,6 @@ interface TaskDao {
     @Query("SELECT * FROM tasks WHERE calendarEventId = :calendarEventId")
     suspend fun getTaskByCalendarId(calendarEventId: Long): TaskEntity?
 
-    /**
-     * Obtiene todas las tareas que no están finalizadas y cuyo próximo recordatorio ya pasó o nunca fue programado.
-     * Esta es la consulta clave para el ReminderEngine.
-     */
     @Query("""
         SELECT * FROM tasks
         WHERE (isFinished = 0)
@@ -47,6 +43,14 @@ interface TaskDao {
         ORDER BY scheduledTime ASC
     """)
     suspend fun getTasksNeedingReminder(now: Long): List<TaskEntity>
+
+    @Query("""
+        SELECT * FROM tasks
+        WHERE isFromCalendar = 1
+        AND scheduledTime >= :startOfDay
+        AND scheduledTime < :endOfDay
+    """)
+    suspend fun getCalendarTasksForDateRange(startOfDay: Long, endOfDay: Long): List<TaskEntity>
 
 
     // --- FLUJOS OBSERVABLES (Para que la UI se actualice sola) ---
@@ -57,9 +61,6 @@ interface TaskDao {
     @Query("SELECT * FROM tasks ORDER BY scheduledTime ASC")
     fun observeAllTasks(): Flow<List<TaskEntity>>
 
-    /**
-     * Observa las tareas para una fecha específica.
-     */
     @Query("""
         SELECT * FROM tasks
         WHERE scheduledTime >= :startOfDay
@@ -67,6 +68,14 @@ interface TaskDao {
         ORDER BY scheduledTime ASC
     """)
     fun observeTasksForDate(startOfDay: Long, endOfDay: Long): Flow<List<TaskEntity>>
+
+    @Query("""
+        SELECT * FROM tasks
+        WHERE scheduledTime >= :startOfDay
+        AND scheduledTime < :endOfDay
+        ORDER BY scheduledTime ASC
+    """)
+    fun observeTasksForDateRange(startOfDay: Long, endOfDay: Long): Flow<List<TaskEntity>>
 
 
     // --- ACTUALIZACIONES DE ESTADO (ACCIONES) ---
@@ -77,8 +86,14 @@ interface TaskDao {
     @Query("UPDATE tasks SET isFinished = 1, updatedAt = :timestamp WHERE id = :taskId")
     suspend fun finishTask(taskId: String, timestamp: Long = System.currentTimeMillis())
 
-    @Query("UPDATE tasks SET isFinished = 0, isAcknowledged = 0, reminderCount = 0, nextReminderAt = NULL, updatedAt = :timestamp WHERE id = :taskId")
+    @Query("UPDATE tasks SET isFinished = 0, isAcknowledged = 0, reminderCount = 0, nextReminderAt = NULL, isStarted = 0, updatedAt = :timestamp WHERE id = :taskId")
     suspend fun resetTaskStatus(taskId: String, timestamp: Long = System.currentTimeMillis())
+
+    @Query("UPDATE tasks SET isStarted = 1, isAcknowledged = 1, updatedAt = :timestamp WHERE id = :taskId")
+    suspend fun startTask(taskId: String, timestamp: Long = System.currentTimeMillis())
+
+
+    // --- ACTUALIZACIONES DE RECORDATORIOS Y LOGS ---
 
     @Query("""
         UPDATE tasks
@@ -99,12 +114,15 @@ interface TaskDao {
     """)
     suspend fun updateInitialReminderState(taskId: String, reminderCount: Int, nextReminderAt: Long?, timestamp: Long = System.currentTimeMillis())
 
+    @Query("UPDATE tasks SET locationContext = :locationContext, travelTimeMinutes = :travelTime, updatedAt = :timestamp WHERE id = :taskId")
+    suspend fun updateTaskLocation(taskId: String, locationContext: String, travelTime: Int, timestamp: Long = System.currentTimeMillis())
 
-    // --- OPERACIONES DE SINCRONIZACIÓN Y LIMPIEZA ---
+    @Query("UPDATE tasks SET conversationLog = :logJson, updatedAt = :timestamp WHERE id = :taskId")
+    suspend fun updateConversationLog(taskId: String, logJson: String, timestamp: Long)
 
-    @Query("DELETE FROM tasks WHERE isFromCalendar = 1 AND calendarEventId NOT IN (:activeCalendarIds)")
-    suspend fun deleteRemovedCalendarEvents(activeCalendarIds: List<Long>)
+    @Query("UPDATE tasks SET conversationLog = :logJson, unreadMessageCount = unreadMessageCount + 1, updatedAt = :timestamp WHERE id = :taskId")
+    suspend fun updateConversationLogAndIncrementUnread(taskId: String, logJson: String, timestamp: Long)
 
-    @Query("DELETE FROM tasks WHERE isFinished = 1 AND updatedAt < :beforeDate")
-    suspend fun deleteOldCompletedTasks(beforeDate: Long)
+    @Query("UPDATE tasks SET unreadMessageCount = 0, updatedAt = :timestamp WHERE id = :taskId")
+    suspend fun resetUnreadMessageCount(taskId: String, timestamp: Long = System.currentTimeMillis())
 }

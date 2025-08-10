@@ -2,22 +2,22 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.READ_CALENDAR" />
+    <uses-permission android:name="android.permission.WRITE_CALENDAR" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
-
-
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
 
     <application
@@ -35,6 +35,7 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:launchMode="singleTop"
             android:theme="@style/Theme.Chapelotas">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -51,11 +52,20 @@
             android:turnScreenOn="true"
             android:theme="@style/Theme.Chapelotas.FullScreen" />
 
+        <activity
+            android:name=".presentation.ui.AlarmActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:launchMode="singleTask"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:theme="@style/Theme.Chapelotas.FullScreen" />
+
         <service
             android:name=".data.notifications.ChapelotasNotificationService"
             android:enabled="true"
             android:exported="false"
-            android:foregroundServiceType="dataSync" />
+            android:foregroundServiceType="dataSync|specialUse" />
 
         <receiver
             android:name=".data.notifications.BootReceiver"
@@ -72,8 +82,28 @@
             android:enabled="true"
             android:exported="false" />
 
+        <receiver
+            android:name=".data.alarms.AlarmReceiver"
+            android:enabled="true"
+            android:exported="false" />
+
         <receiver android:name=".data.notifications.NotificationActionReceiver" />
-        <receiver android:name=".data.notifications.HeartbeatReceiver" />
+        <receiver android:name=".data.notifications.KeepAliveReceiver" />
+
+        <receiver
+            android:name=".data.notifications.NightGuardianReceiver"
+            android:enabled="true"
+            android:exported="false" />
+
+        <receiver
+            android:name=".data.notifications.PrewarmReceiver"
+            android:enabled="true"
+            android:exported="false" />
+
+        <receiver
+            android:name=".battery.HuaweiSetupReminderReceiver"
+            android:enabled="true"
+            android:exported="false" />
 
         <provider
             android:name="androidx.startup.InitializationProvider"
