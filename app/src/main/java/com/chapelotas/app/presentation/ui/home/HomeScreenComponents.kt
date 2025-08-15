@@ -77,56 +77,6 @@ fun TaskList(
 ) {
     val context = LocalContext.current
 
-    // Comentado temporalmente la validación de debug
-    // Se puede descomentar si se agregan los imports necesarios (Log, BuildConfig)
-    /*
-    // Validación en modo debug para detectar keys duplicadas
-    if (BuildConfig.DEBUG) {
-        val keys = mutableSetOf<String>()
-        val duplicates = mutableListOf<String>()
-
-        items.forEachIndexed { index, item ->
-            val key = when (item) {
-                is DisplayableItem.Event -> {
-                    val task = item.task
-                    val timeMillis = task.scheduledTime.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
-                    "event_${task.id}_${timeMillis}_${task.title.hashCode()}_idx$index"
-                }
-                is DisplayableItem.Todo -> {
-                    val task = item.task
-                    "todo_${task.id}_${task.isFinished}_${task.title.hashCode()}_idx$index"
-                }
-                is DisplayableItem.TodoHeader -> "todo_header_idx$index"
-            }
-
-            if (!keys.add(key)) {
-                duplicates.add(key)
-                Log.e("TaskList", "⚠️ Key duplicada: $key")
-            }
-        }
-
-        if (duplicates.isNotEmpty()) {
-            Log.e("TaskList", "❌ PROBLEMA: Se encontraron ${duplicates.size} keys duplicadas")
-            // Imprimir detalles para debugging
-            items.forEachIndexed { index, item ->
-                when (item) {
-                    is DisplayableItem.Event -> {
-                        val task = item.task
-                        Log.v("TaskList", "[$index] Event: id=${task.id}, title='${task.title}', time=${task.scheduledTime}, finished=${task.isFinished}")
-                    }
-                    is DisplayableItem.Todo -> {
-                        val task = item.task
-                        Log.v("TaskList", "[$index] Todo: id=${task.id}, title='${task.title}', finished=${task.isFinished}")
-                    }
-                    is DisplayableItem.TodoHeader -> {
-                        Log.v("TaskList", "[$index] TodoHeader")
-                    }
-                }
-            }
-        }
-    }
-    */
-
     Box(modifier = Modifier.fillMaxSize()) {
         LazyColumn(
             state = lazyListState,
@@ -433,7 +383,8 @@ fun ChapelotasMessageBubble(message: String) {
             modifier = Modifier
                 .fillMaxWidth(0.85f)
                 .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomEnd = 16.dp))
-                .background(MaterialTheme.colorScheme.surface)
+                // ✅ CORRECCIÓN: Se cambió el color de fondo para que contraste.
+                .background(MaterialTheme.colorScheme.surfaceVariant)
                 .padding(horizontal = 16.dp, vertical = 10.dp)
         ) {
             Text(

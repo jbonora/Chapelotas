@@ -69,13 +69,17 @@ class EventLogger @Inject constructor(
             is SystemEvent.AppStarted -> "🚀 APP INICIADA"
             is SystemEvent.AppResumed -> "🚀 APP RESUMIDA"
             is SystemEvent.AppPaused -> "🚀 APP PAUSADA"
-            // --- INICIO DE LA MODIFICACIÓN ---
-            is SystemEvent.SettingsChanged -> "⚙️ AJUSTES CAMBIARON: Disparando recálculo de alarma."
-            // --- FIN DE LA MODIFICACIÓN ---
             is SystemEvent.PermissionGranted -> "✅ PERMISO CONCEDIDO: ${event.permission}"
             is SystemEvent.PermissionDenied -> "❌ PERMISO DENEGADO: ${event.permission}"
             is SystemEvent.ServiceStarted -> "🔧 SERVICIO INICIADO: ${event.serviceName}"
             is SystemEvent.ServiceStopped -> "🔧 SERVICIO DETENIDO: ${event.serviceName}"
+            is SystemEvent.DayChanged -> "🌙 DÍA CAMBIADO: La fecha ha cambiado, refrescando la UI."
+
+            // --- ✅ CORRECCIÓN AQUÍ ---
+            // Añadimos los nuevos eventos y eliminamos el antiguo 'SettingsChanged'.
+            is SystemEvent.AlarmSettingsChanged -> "⚙️ AJUSTES DE ALARMA CAMBIARON: Disparando recálculo de alarma."
+            is SystemEvent.PersonalitySettingsChanged -> "🧠 AJUSTES DE PERSONALIDAD CAMBIARON."
+            // --- FIN DE LA CORRECCIÓN ---
         }
 
         debugLog.add("EVENT_BUS: $message")

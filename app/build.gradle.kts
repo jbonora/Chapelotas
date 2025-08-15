@@ -62,12 +62,19 @@ android {
 }
 
 dependencies {
-    // ---- Hilt (Inyección de dependencias) ----
+    // ---- Hilt & Dagger (Inyección de dependencias) ----
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
     implementation(libs.androidx.hilt.navigation.compose)
+    // Hilt para WorkManager
     implementation(libs.androidx.hilt.work)
     ksp(libs.androidx.hilt.compiler)
+    // >>> LA LÍNEA QUE FALTABA <<<
+    // Añadir el compilador de Dagger para que KSP entienda @AssistedInject
+    ksp("com.google.dagger:dagger-compiler:2.50")
+
+    // ---- App Startup ----
+    implementation("androidx.startup:startup-runtime:1.1.1")
 
     // ---- Compose (Interfaz de Usuario) ----
     implementation(platform(libs.compose.bom))

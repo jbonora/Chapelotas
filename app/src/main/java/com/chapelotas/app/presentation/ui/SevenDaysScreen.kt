@@ -19,6 +19,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -48,7 +49,7 @@ private fun getDayDisplayName(day: LocalDate): String {
 @Composable
 fun SevenDaysScreen(
     navController: NavController,
-    mainViewModel: MainViewModel = hiltViewModel(), // <-- AÑADIDO: Obtenemos el MainViewModel
+    mainViewModel: MainViewModel = hiltViewModel(),
     sevenDaysViewModel: SevenDaysViewModel = hiltViewModel()
 ) {
     val sevenDaysUiState by sevenDaysViewModel.uiState.collectAsStateWithLifecycle()
@@ -89,7 +90,7 @@ fun SevenDaysScreen(
                         if (!task.isTodo) {
                             EventListItem(
                                 task = task,
-                                viewModel = mainViewModel, // <-- CORREGIDO: Pasamos el viewModel
+                                viewModel = mainViewModel,
                                 navController = navController,
                                 isHighlighted = false,
                                 onHighlightConsumed = {}
@@ -145,7 +146,7 @@ fun FreeTimeBlocksCard(
                     )
 
                     if (schedule != null) {
-                        TimeBlockSection(title = "Por la mañana", block = schedule.morning, day = day)
+                        TimeBlockSection(title = "Mañana", block = schedule.morning, day = day)
                         TimeBlockSection(title = "Almuerzo", block = schedule.lunch, day = day)
                         TimeBlockSection(title = "Tarde", block = schedule.afternoon, day = day)
                         TimeBlockSection(title = "Cena", block = schedule.dinner, day = day)
@@ -163,9 +164,6 @@ fun FreeTimeBlocksCard(
 
 @Composable
 private fun TimeBlockSection(title: String, block: TimeBlock, day: LocalDate) {
-    val timeFormatter = DateTimeFormatter.ofPattern("HH:mm")
-    val context = LocalContext.current
-
     Row(verticalAlignment = Alignment.Top) {
         Text(
             text = title,
@@ -174,63 +172,24 @@ private fun TimeBlockSection(title: String, block: TimeBlock, day: LocalDate) {
         )
         Column {
             when (block.status) {
-                BlockStatus.HAS_SLOTS -> {
-                    if (block.slots.isEmpty()) {
+                BlockStatus.HAS_SLOTS, BlockStatus.FULLY_BOOKED -> {
+                    if (block.items.isEmpty()) {
                         Text(
-                            text = "Sin huecos de 30 min o más.",
+                            text = if (block.status == BlockStatus.FULLY_BOOKED) "Ocupado." else "Sin huecos de 30 min o más.",
                             style = MaterialTheme.typography.bodyMedium,
                             fontStyle = FontStyle.Italic,
                             color = Color.Gray
                         )
                     } else {
-                        block.slots.forEach { slot ->
-                            key(day.toString() + slot.start.toString()) {
-                                Row(
-                                    modifier = Modifier.clickable {
-                                        val beginTime = day.atTime(slot.start).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
-                                        val endTime = day.atTime(slot.end).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
-                                        val intent = Intent(Intent.ACTION_INSERT)
-                                            .setData(CalendarContract.Events.CONTENT_URI)
-                                            .putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME, beginTime)
-                                            .putExtra(CalendarContract.EXTRA_EVENT_END_TIME, endTime)
-                                        try {
-                                            context.startActivity(intent)
-                                        } catch (e: Exception) {
-                                            Toast.makeText(context, "No se encontró una app de calendario.", Toast.LENGTH_SHORT).show()
-                                        }
-                                    },
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    val color = if (slot.durationMinutes < 60) {
-                                        MaterialTheme.colorScheme.tertiary
-                                    } else {
-                                        MaterialTheme.colorScheme.onSurface
-                                    }
-
-                                    Text(
-                                        text = "${slot.start.format(timeFormatter)} - ${slot.end.format(timeFormatter)}",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = color
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(
-                                        text = "(${slot.description})",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        fontStyle = FontStyle.Italic,
-                                        color = color
-                                    )
+                        block.items.forEach { item ->
+                            key(day.toString() + item.hashCode()) { // Use a unique key
+                                when (item) {
+                                    is ScheduleItem.Free -> FreeSlotView(slot = item.slot, day = day)
+                                    is ScheduleItem.Busy -> BusySlotView(busy = item)
                                 }
                             }
                         }
                     }
-                }
-                BlockStatus.FULLY_BOOKED -> {
-                    Text(
-                        text = "Ocupado.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontStyle = FontStyle.Italic,
-                        color = Color.Gray
-                    )
                 }
                 BlockStatus.OUTSIDE_WORK_HOURS -> {
                     Text(
@@ -250,5 +209,68 @@ private fun TimeBlockSection(title: String, block: TimeBlock, day: LocalDate) {
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun FreeSlotView(slot: TimeSlot, day: LocalDate) {
+    val timeFormatter = DateTimeFormatter.ofPattern("HH:mm")
+    val context = LocalContext.current
+
+    Row(
+        modifier = Modifier.clickable {
+            val beginTime = day.atTime(slot.start).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+            val endTime = day.atTime(slot.end).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+            val intent = Intent(Intent.ACTION_INSERT)
+                .setData(CalendarContract.Events.CONTENT_URI)
+                .putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME, beginTime)
+                .putExtra(CalendarContract.EXTRA_EVENT_END_TIME, endTime)
+            try {
+                context.startActivity(intent)
+            } catch (e: Exception) {
+                Toast.makeText(context, "No se encontró una app de calendario.", Toast.LENGTH_SHORT).show()
+            }
+        },
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        val color = if (slot.durationMinutes < 60) {
+            MaterialTheme.colorScheme.tertiary
+        } else {
+            MaterialTheme.colorScheme.onSurface
+        }
+
+        Text(
+            text = "${slot.start.format(timeFormatter)} - ${slot.end.format(timeFormatter)}",
+            style = MaterialTheme.typography.bodyMedium,
+            color = color
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(
+            text = "(${slot.description})",
+            style = MaterialTheme.typography.bodySmall,
+            fontStyle = FontStyle.Italic,
+            color = color
+        )
+    }
+}
+
+@Composable
+private fun BusySlotView(busy: ScheduleItem.Busy) {
+    val timeFormatter = DateTimeFormatter.ofPattern("HH:mm")
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            text = "${busy.start.format(timeFormatter)} - ${busy.end.format(timeFormatter)}",
+            style = MaterialTheme.typography.bodyMedium,
+            color = Color.Gray
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(
+            text = busy.description,
+            style = MaterialTheme.typography.bodySmall,
+            fontStyle = FontStyle.Italic,
+            color = Color.Gray,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }

@@ -49,7 +49,6 @@
     <string name="settings_insistence_interval_section_title">Intervalo de insistencia (minutos)</string>
     <string name="settings_low_urgency_interval_label">Baja insistencia (evento en curso aceptado)</string>
     <string name="settings_high_urgency_interval_label">Alta insistencia (en curso no aceptado / demorado)</string>
-    <string name="settings_sarcastic_mode_label">Modo Sarcástico</string>
     <string name="settings_slider_minutes_label">%1$s: %2$d min</string>
 
 
@@ -159,8 +158,10 @@
     <string name="settings_snooze_info">Establece la cantidad de minutos que durará la función \'snooze\' (posponer) cuando suene la alarma despertador.</string>
     <string name="settings_pre_event_reminders_info">Configura con cuántos minutos de antelación quieres recibir los avisos antes de que comience un evento. Puedes establecer hasta 3 avisos progresivos.</string>
     <string name="settings_insistence_interval_info">Aquí defines cada cuántos minutos Chapelotas te volverá a notificar sobre un evento que ya está en curso y que no has marcado como finalizado.\n\n•\u0020<b>Baja insistencia:</b> Es un recordatorio suave para tareas que ya aceptaste (\"Entendido\") pero que siguen activas.\n\n•\u0020<b>Alta insistencia:</b> Es un recordatorio más frecuente y directo para tareas que están en curso o demoradas y que ni siquiera has aceptado.</string>    <string name="settings_insistence_profile_info">Elige el tipo de sonido para las notificaciones de insistencia. \'Normal\' usa el sonido principal, mientras que \'Medio\' y \'Bajo\' usan sonidos más discretos y menos molestos.</string>
-    <string name="settings_sarcastic_mode_info">Activa o desactiva los comentarios sarcásticos de Chapelotas en las notificaciones y alarmas. ¡Úsalo bajo tu propio riesgo!</string>
-    
 
+    <!-- NUEVOS STRINGS -->
+    <string name="settings_personality_section_title">Personalidad de Chapelotas</string>
+    <string name="settings_personality_label">Personalidad</string>
+    <string name="settings_personality_info">Elige la personalidad que quieres que tenga tu asistente. Esto cambiará el tono y el estilo de todos los mensajes y notificaciones.</string>
 
 </resources>

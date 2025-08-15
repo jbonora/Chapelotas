@@ -101,15 +101,15 @@ class CalendarSyncUseCase @Inject constructor(
             return
         }
 
-        // AGREGADO: Sincronización inicial al comenzar el monitoreo
-        debugLog.add("👁️ MONITOR: Realizando sincronización inicial...")
-        val today = LocalDate.now()
-        syncDateRange(today, today.plusDays(6), triggerReminders = true)
+        // --- CORRECCIÓN: Se elimina la sincronización inicial de esta función ---
+        // El ViewModel se encarga de la primera sincronización. El servicio
+        // solo se encarga de inicializar los recordatorios para tareas ya existentes
+        // y de escuchar futuros cambios.
 
-        // AGREGADO: Pequeño delay para asegurar que todo se inicialice
+        // Pequeño delay para asegurar que todo se inicialice
         delay(2000)
 
-        // AGREGADO: Verificar tareas existentes y programar recordatorios
+        // Verificar tareas existentes y programar recordatorios
         debugLog.add("👁️ MONITOR: Inicializando recordatorios para tareas existentes...")
         reminderEngine.initializeOrUpdateAllReminders()
 

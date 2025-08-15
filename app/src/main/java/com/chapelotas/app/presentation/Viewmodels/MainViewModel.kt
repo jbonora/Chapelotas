@@ -17,12 +17,15 @@ import com.chapelotas.app.domain.events.TaskEvent
 import com.chapelotas.app.domain.models.Sender
 import com.chapelotas.app.domain.models.Task
 import com.chapelotas.app.domain.models.TaskType
+import com.chapelotas.app.domain.models.TaskStatus
 import com.chapelotas.app.domain.permissions.AppStatusManager
 import com.chapelotas.app.domain.permissions.PermissionStatus
 import com.chapelotas.app.domain.personality.PersonalityProvider
 import com.chapelotas.app.domain.repositories.NotificationRepository
 import com.chapelotas.app.domain.repositories.PreferencesRepository
 import com.chapelotas.app.domain.repositories.TaskRepository
+import com.chapelotas.app.domain.time.TimeManager
+import com.chapelotas.app.domain.time.TimeRemaining
 import com.chapelotas.app.domain.usecases.AlarmSchedulerUseCase
 import com.chapelotas.app.domain.usecases.CalendarSyncUseCase
 import com.chapelotas.app.domain.usecases.ReminderEngine
@@ -36,12 +39,32 @@ import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 import javax.inject.Inject
 
+// Modelo de datos actualizado con tiempo restante
 sealed class DisplayableItem {
-    data class Event(val task: Task) : DisplayableItem()
-    object TodoHeader : DisplayableItem()
-    data class Todo(val task: Task) : DisplayableItem()
+    abstract val id: String
+
+    data class Event(
+        val task: Task,
+        val timeRemaining: TimeRemaining? = null,
+        val formattedTime: String = ""
+    ) : DisplayableItem() {
+        override val id: String = task.id
+    }
+
+    object TodoHeader : DisplayableItem() {
+        override val id: String = "todo_header"
+    }
+
+    data class Todo(
+        val task: Task,
+        val timeRemaining: TimeRemaining? = null,
+        val formattedTime: String = ""
+    ) : DisplayableItem() {
+        override val id: String = task.id
+    }
 }
 
 data class MainUiState(
@@ -49,7 +72,8 @@ data class MainUiState(
     val needsPermission: Boolean = false,
     val error: String? = null,
     val showBatteryProtectionDialog: Boolean = false,
-    val nextAlarmDuration: Duration? = null
+    val nextAlarmDuration: Duration? = null,
+    val currentTime: LocalDateTime = LocalDateTime.now()
 )
 
 @HiltViewModel
@@ -64,33 +88,34 @@ class MainViewModel @Inject constructor(
     private val notificationRepository: NotificationRepository,
     private val personalityProvider: PersonalityProvider,
     private val eventBus: EventBus,
-    private val alarmScheduler: AlarmSchedulerUseCase
+    private val alarmScheduler: AlarmSchedulerUseCase,
+    private val timeManager: TimeManager  // NUEVO: Inyección del TimeManager
 ) : ViewModel() {
+
+    private val timeFormatter = DateTimeFormatter.ofPattern("HH:mm")
 
     private val _uiState = MutableStateFlow(MainUiState())
     val uiState: StateFlow<MainUiState> = _uiState.asStateFlow()
 
+    private val _showNewDayDialog = MutableStateFlow(false)
+    val showNewDayDialog: StateFlow<Boolean> = _showNewDayDialog.asStateFlow()
+
+    private val _currentDate = MutableStateFlow(LocalDate.now())
     private var countdownJob: Job? = null
 
-    val todayItems: StateFlow<List<DisplayableItem>> = taskRepository.observeTasksForDate(LocalDate.now())
-        .map { tasks ->
-            val (todos, events) = tasks.partition { it.taskType == TaskType.TODO }
-            buildList {
-                addAll(events.sortedBy { it.scheduledTime }.map { DisplayableItem.Event(it) })
-                if (todos.isNotEmpty()) {
-                    add(DisplayableItem.TodoHeader)
-                    addAll(
-                        todos.sortedWith(compareBy({ it.isFinished }, { !it.isStarted }))
-                            .map { DisplayableItem.Todo(it) }
-                    )
-                }
-            }
-        }
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = emptyList()
-        )
+    // CAMBIO PRINCIPAL: Combinar tareas con tiempo actual para actualización continua
+    val todayItems: StateFlow<List<DisplayableItem>> = combine(
+        _currentDate.flatMapLatest { date ->
+            taskRepository.observeTasksForDate(date)
+        },
+        timeManager.currentTimeFlow // Actualización cada segundo
+    ) { tasks, currentTime ->
+        buildDisplayableItems(tasks, currentTime)
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = emptyList()
+    )
 
     init {
         debugLog.add("VIEWMODEL: ==> MainViewModel inicializado.")
@@ -98,6 +123,117 @@ class MainViewModel @Inject constructor(
         checkPermissionsAndInitialSync()
         checkNextAlarm()
         checkIfBatteryProtectionIsNeeded()
+        startMidnightDetector()
+        startTimeUpdater() // NUEVO: Iniciar actualizador de tiempo
+    }
+
+    // NUEVA FUNCIÓN: Construir items con tiempo actualizado
+    private fun buildDisplayableItems(tasks: List<Task>, currentTime: LocalDateTime): List<DisplayableItem> {
+        val (todos, events) = tasks.partition { it.taskType == TaskType.TODO }
+
+        return buildList {
+            // Agregar eventos con tiempo restante
+            addAll(
+                events.sortedBy { it.scheduledTime }.map { task ->
+                    val timeRemaining = if (!task.isFinished) {
+                        timeManager.getTimeUntil(task.scheduledTime)
+                    } else null
+
+                    val formattedTime = when {
+                        task.isFinished -> "✓ Finalizado"
+                        timeRemaining != null -> {
+                            val timeStr = timeManager.formatTimeRemaining(timeRemaining)
+                            val scheduleStr = task.scheduledTime.format(timeFormatter)
+                            "$scheduleStr ($timeStr)"
+                        }
+                        else -> task.scheduledTime.format(timeFormatter)
+                    }
+
+                    DisplayableItem.Event(
+                        task = task,
+                        timeRemaining = timeRemaining,
+                        formattedTime = formattedTime
+                    )
+                }
+            )
+
+            // Agregar TODOs
+            if (todos.isNotEmpty()) {
+                add(DisplayableItem.TodoHeader)
+                addAll(
+                    todos.sortedWith(
+                        compareBy({ it.isFinished }, { !it.isStarted })
+                    ).map { task ->
+                        DisplayableItem.Todo(
+                            task = task,
+                            timeRemaining = null,
+                            formattedTime = when {
+                                task.isFinished -> "✓ Completado"
+                                task.isStarted -> "En progreso"
+                                else -> "Pendiente"
+                            }
+                        )
+                    }
+                )
+            }
+        }
+    }
+
+    // NUEVA FUNCIÓN: Actualizar el tiempo en el UI state
+    private fun startTimeUpdater() {
+        viewModelScope.launch {
+            timeManager.currentTimeFlow.collect { currentTime ->
+                _uiState.update { it.copy(currentTime = currentTime) }
+
+                // Actualizar última actividad periódicamente
+                if (currentTime.second == 0) { // Solo cada minuto
+                    preferencesRepository.updateLastActivityTime(System.currentTimeMillis())
+                }
+            }
+        }
+    }
+
+    private fun startMidnightDetector() {
+        viewModelScope.launch {
+            while (true) {
+                val now = LocalDateTime.now()
+                val tomorrow = now.toLocalDate().plusDays(1).atStartOfDay()
+                val millisUntilMidnight = Duration.between(now, tomorrow).toMillis()
+
+                val delayTime = if (millisUntilMidnight > 24 * 60 * 60 * 1000) {
+                    23 * 60 * 60 * 1000L
+                } else {
+                    millisUntilMidnight + 100
+                }
+
+                debugLog.add("🕐 MIDNIGHT: Esperando ${delayTime / 1000 / 60} minutos hasta próximo check")
+                delay(delayTime)
+
+                val newDate = LocalDate.now()
+                if (newDate != _currentDate.value) {
+                    debugLog.add("🌙 MIDNIGHT: ¡Nuevo día detectado! Mostrando diálogo...")
+                    _showNewDayDialog.value = true
+                }
+            }
+        }
+    }
+
+    fun onNewDayRefreshAccepted() {
+        viewModelScope.launch {
+            debugLog.add("🌙 MIDNIGHT: Usuario aceptó refresh de nuevo día")
+            _showNewDayDialog.value = false
+            _currentDate.value = LocalDate.now()
+            eventBus.emit(SystemEvent.DayChanged)
+            _uiState.update { it.copy(isLoading = true) }
+            val today = LocalDate.now()
+            calendarSyncUseCase.syncDateRange(today, today.plusDays(30), triggerReminders = true)
+            alarmScheduler.scheduleNextAlarm()
+        }
+    }
+
+    fun onNewDayRefreshDismissed() {
+        debugLog.add("🌙 MIDNIGHT: Usuario canceló refresh de nuevo día")
+        _showNewDayDialog.value = false
     }
 
     private fun startMonitoringAndSync() {
@@ -125,6 +261,7 @@ class MainViewModel @Inject constructor(
     }
 
     private fun subscribeToEvents() {
+        // Escuchar eventos de alarma
         viewModelScope.launch {
             eventBus.alarmEvents.collect { event ->
                 when (event) {
@@ -140,30 +277,47 @@ class MainViewModel @Inject constructor(
             }
         }
 
+        // Escuchar eventos del calendario
         viewModelScope.launch {
             eventBus.calendarEvents.collect { event ->
                 when (event) {
                     is CalendarEvent.SyncCompleted -> {
                         _uiState.update { it.copy(isLoading = false, error = null) }
                         if (event.newTasksCount > 0) {
-                            debugLog.add("VIEWMODEL: Sync completado con ${event.newTasksCount} tareas nuevas. Disparando reprogramación de alarma.")
+                            debugLog.add("VIEWMODEL: Sync completado con ${event.newTasksCount} tareas nuevas.")
                             alarmScheduler.scheduleNextAlarm()
-                        } else {
-                            debugLog.add("VIEWMODEL: Sync completado sin tareas nuevas. No se reprograma la alarma.")
                         }
                     }
                     is CalendarEvent.SyncFailed -> {
-                        _uiState.update { it.copy(isLoading = false, error = "Error sincronizando: ${event.error}") }
+                        _uiState.update {
+                            it.copy(isLoading = false, error = "Error sincronizando: ${event.error}")
+                        }
                     }
                     else -> {}
                 }
             }
         }
 
+        // Escuchar eventos del sistema
         viewModelScope.launch {
             eventBus.systemEvents.collect { event ->
-                if (event is SystemEvent.SettingsChanged) {
+                if (event is SystemEvent.AlarmSettingsChanged) {
                     alarmScheduler.scheduleNextAlarm()
+                }
+            }
+        }
+
+        // NUEVO: Escuchar cambios en tareas para refrescar inmediatamente
+        viewModelScope.launch {
+            eventBus.taskEvents.collect { event ->
+                when (event) {
+                    is TaskEvent.TaskStatusChanged,
+                    is TaskEvent.TaskAcknowledged,
+                    is TaskEvent.TaskUpdated -> {
+                        // El UI se actualizará automáticamente porque observamos el Flow de tareas
+                        debugLog.add("VIEWMODEL: Evento de tarea recibido, UI se actualizará automáticamente")
+                    }
+                    else -> {}
                 }
             }
         }
@@ -286,7 +440,9 @@ class MainViewModel @Inject constructor(
     fun acknowledgeTask(taskId: String) {
         performActionAndRespond(taskId, "Entendido", "acknowledge") {
             taskRepository.acknowledgeTask(it)
-            viewModelScope.launch { eventBus.emit(TaskEvent.TaskAcknowledged(taskId = it)) }
+            viewModelScope.launch {
+                eventBus.emit(TaskEvent.TaskAcknowledged(taskId = it))
+            }
         }
     }
 
@@ -305,7 +461,9 @@ class MainViewModel @Inject constructor(
                 taskRepository.finishTask(it)
                 notificationRepository.cancelTaskNotification(it)
                 reminderEngine.initializeOrUpdateAllReminders()
-                viewModelScope.launch { eventBus.emit(TaskEvent.TaskStatusChanged(it, "FINISHED", true)) }
+                viewModelScope.launch {
+                    eventBus.emit(TaskEvent.TaskStatusChanged(it, "FINISHED", true))
+                }
             }
         }
     }

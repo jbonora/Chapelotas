@@ -42,7 +42,6 @@ class TaskDetailViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            // Esto se encarga de limpiar el contador la primera vez que entras a la pantalla.
             taskRepository.resetUnreadMessageCount(taskId)
             combine(
                 taskRepository.observeTask(taskId),
@@ -57,12 +56,37 @@ class TaskDetailViewModel @Inject constructor(
 
     fun updateTaskLocation(context: String, customTravelTime: Int? = null) {
         viewModelScope.launch {
+            val currentTask = uiState.value.task ?: return@launch
+            val oldLocationContext = currentTask.locationContext
+            val oldTravelTime = currentTask.travelTimeMinutes
+
             val travelTime = customTravelTime ?: when (context) {
                 LocationContext.NEARBY -> uiState.value.settings.travelTimeNearbyMinutes
                 LocationContext.FAR -> uiState.value.settings.travelTimeFarMinutes
                 else -> 0
             }
+
+            // Actualizar en la base de datos
             taskRepository.updateTaskLocation(taskId, context, travelTime)
+
+            // CAMBIO IMPORTANTE: Emitir eventos al bus para que ReminderEngine lo procese
+            if (oldLocationContext != context) {
+                eventBus.emit(TaskEvent.TaskUpdated(
+                    taskId = taskId,
+                    field = "locationContext",
+                    oldValue = oldLocationContext,
+                    newValue = context
+                ))
+            }
+
+            if (oldTravelTime != travelTime) {
+                eventBus.emit(TaskEvent.TaskUpdated(
+                    taskId = taskId,
+                    field = "travelTime",
+                    oldValue = oldTravelTime,
+                    newValue = travelTime
+                ))
+            }
         }
     }
 
@@ -73,13 +97,14 @@ class TaskDetailViewModel @Inject constructor(
     ) {
         viewModelScope.launch {
             val task = uiState.value.task ?: return@launch
-            // 1. Se añade la acción del usuario al log. No incrementa el contador.
+
+            // 1. Se añade la acción del usuario al log
             taskRepository.addMessageToLog(taskId, userActionText, Sender.USUARIO, incrementCounter = false)
 
-            // 2. Se ejecuta la lógica principal (aceptar, finalizar, etc.).
+            // 2. Se ejecuta la lógica principal
             taskFunction(taskId)
 
-            // 3. Se genera y añade la respuesta de la app. ESTO incrementa el contador a 1.
+            // 3. Se genera y añade la respuesta de la app
             val settings = uiState.value.settings
             val responseMessage = personalityProvider.get(
                 personalityKey = settings.personalityProfile,
@@ -91,11 +116,8 @@ class TaskDetailViewModel @Inject constructor(
                 TaskEvent.MessageAdded(taskId, responseMessage, Sender.CHAPELOTAS.name, true)
             )
 
-            // --- INICIO DE LA CORRECCIÓN ---
-            // 4. Inmediatamente después, reseteamos el contador. Como el usuario está en esta
-            //    pantalla, ya ha "leído" la respuesta que acaba de aparecer.
+            // 4. Reset contador ya que el usuario está viendo la pantalla
             taskRepository.resetUnreadMessageCount(taskId)
-            // --- FIN DE LA CORRECCIÓN ---
         }
     }
 

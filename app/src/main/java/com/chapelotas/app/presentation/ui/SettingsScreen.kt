@@ -15,6 +15,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.OffsetMapping
 import androidx.compose.ui.text.input.TransformedText
@@ -25,6 +26,7 @@ import androidx.navigation.NavController
 import com.chapelotas.app.R
 import com.chapelotas.app.domain.models.InsistenceProfile
 import com.chapelotas.app.presentation.viewmodels.SettingsViewModel
+import com.chapelotas.app.presentation.viewmodels.SettingsUiState
 
 /**
  * Un Composable reutilizable que muestra un ícono de información y abre un diálogo al hacer clic.
@@ -65,7 +67,8 @@ fun SettingsScreen(
     onSetupComplete: (() -> Unit)? = null,
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
-    val settings by viewModel.settings.collectAsState()
+    val uiState by viewModel.uiState.collectAsState()
+    val settings = uiState.settings
 
     Scaffold(
         topBar = {
@@ -99,6 +102,14 @@ fun SettingsScreen(
                 )
 
                 HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
+                PersonalitySelectorButton(
+                    selectedPersonalityName = uiState.availablePersonalities[settings.personalityProfile] ?: "No seleccionada",
+                    onClick = { navController?.navigate("personality_manager") }
+                )
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
                 Text("Tiempos de Viaje", style = MaterialTheme.typography.titleMedium)
                 SettingsSlider(
                     label = "Viaje a un lugar 'Cerca'",
@@ -117,8 +128,6 @@ fun SettingsScreen(
                     infoText = "Define cuántos minutos de viaje se deben reservar para un evento clasificado como 'lejos'."
                 )
 
-
-                // --- SECCIÓN DE HORARIOS RESTAURADA ---
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Horarios de Referencia", style = MaterialTheme.typography.titleMedium)
                     InfoIconWithDialog(stringResource(id = R.string.settings_work_hours_info))
@@ -176,7 +185,6 @@ fun SettingsScreen(
                         onValueChange = { viewModel.onSettingsChanged(settings.copy(dinnerEndTime = it)) }
                     )
                 }
-                // --- FIN DE LA SECCIÓN RESTAURADA ---
 
                 HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
                 Text("Alarma Despertador Automática", style = MaterialTheme.typography.titleMedium)
@@ -251,21 +259,6 @@ fun SettingsScreen(
                         viewModel.onSettingsChanged(settings.copy(insistenceSoundProfile = newProfile))
                     }
                 )
-                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(stringResource(id = R.string.settings_sarcastic_mode_label))
-                        InfoIconWithDialog(stringResource(id = R.string.settings_sarcastic_mode_info))
-                    }
-                    Switch(
-                        checked = settings.sarcasticMode,
-                        onCheckedChange = { viewModel.onSettingsChanged(settings.copy(sarcasticMode = it)) }
-                    )
-                }
             }
             if (onSetupComplete != null) {
                 Button(
@@ -276,6 +269,33 @@ fun SettingsScreen(
                 ) {
                     Text(stringResource(id = R.string.save_and_finish))
                 }
+            }
+        }
+    }
+}
+
+@Composable
+fun PersonalitySelectorButton(
+    selectedPersonalityName: String,
+    onClick: () -> Unit
+) {
+    Column {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(stringResource(id = R.string.settings_personality_section_title), style = MaterialTheme.typography.titleMedium)
+            InfoIconWithDialog(infoText = stringResource(id = R.string.settings_personality_info))
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        OutlinedButton(
+            onClick = onClick,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Personalidad activa:")
+                Text(selectedPersonalityName, fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -345,6 +365,7 @@ private class TimeVisualTransformation : VisualTransformation {
 }
 
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun InsistenceProfileSelector(
     selectedProfile: String,
@@ -361,24 +382,23 @@ fun InsistenceProfileSelector(
             Text("Comportamiento de Insistencia", style = MaterialTheme.typography.bodyLarge)
             InfoIconWithDialog(infoText = stringResource(id = R.string.settings_insistence_profile_info))
         }
-        Box(modifier = Modifier.fillMaxWidth()) {
+        ExposedDropdownMenuBox(
+            expanded = expanded,
+            onExpandedChange = { expanded = !expanded }
+        ) {
             OutlinedTextField(
                 value = selectedProfile,
                 onValueChange = {},
                 readOnly = true,
                 label = { Text("Perfil de Sonido") },
-                trailingIcon = { Icon(Icons.Default.ArrowDropDown, "Abrir opciones") },
-                modifier = Modifier.fillMaxWidth()
-            )
-            Box(
+                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
                 modifier = Modifier
-                    .matchParentSize()
-                    .clickable(onClick = { expanded = true })
+                    .fillMaxWidth()
+                    .menuAnchor()
             )
-            DropdownMenu(
+            ExposedDropdownMenu(
                 expanded = expanded,
-                onDismissRequest = { expanded = false },
-                modifier = Modifier.fillMaxWidth()
+                onDismissRequest = { expanded = false }
             ) {
                 profiles.forEach { profile ->
                     DropdownMenuItem(

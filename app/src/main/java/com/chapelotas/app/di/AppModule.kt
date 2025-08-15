@@ -12,6 +12,7 @@ import com.chapelotas.app.domain.repositories.CalendarRepository
 import com.chapelotas.app.domain.repositories.NotificationRepository
 import com.chapelotas.app.domain.repositories.PreferencesRepository
 import com.chapelotas.app.domain.repositories.TaskRepository
+import com.chapelotas.app.domain.time.TimeManager
 import com.chapelotas.app.domain.usecases.AlarmSchedulerUseCase
 import com.chapelotas.app.domain.usecases.CalendarSyncUseCase
 import com.chapelotas.app.domain.usecases.ReminderEngine
@@ -91,7 +92,6 @@ object AppModule {
         appStatusManager: AppStatusManager,
         notificationRepository: NotificationRepository,
         eventBus: EventBus
-        // El @ApplicationContext fue eliminado de aquí porque ya estaba en el constructor del UseCase
     ): CalendarSyncUseCase {
         return CalendarSyncUseCase(
             calendarRepository,
@@ -101,7 +101,6 @@ object AppModule {
             appStatusManager,
             notificationRepository,
             eventBus
-            // El context se pasa directamente al constructor, ya no es necesario aquí
         )
     }
 
@@ -114,6 +113,7 @@ object AppModule {
         debugLog: DebugLog,
         personalityProvider: PersonalityProvider,
         huaweiWakeUpManager: HuaweiWakeUpManager,
+        eventBus: EventBus, // <-- CORRECCIÓN: Se agregó el EventBus que faltaba
         @ApplicationContext context: Context
     ): ReminderEngine {
         return ReminderEngine(
@@ -123,7 +123,12 @@ object AppModule {
             debugLog,
             personalityProvider,
             huaweiWakeUpManager,
+            eventBus, // <-- CORRECCIÓN: Se pasó en el orden correcto
             context
         )
     }
+
+    @Provides
+    @Singleton
+    fun provideTimeManager(): TimeManager = TimeManager()
 }

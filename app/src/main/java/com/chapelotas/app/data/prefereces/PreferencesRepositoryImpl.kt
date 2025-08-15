@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.chapelotas.app.domain.models.AppSettings
@@ -31,6 +32,7 @@ class PreferencesRepositoryImpl @Inject constructor(
         val APP_SETTINGS = stringPreferencesKey("app_settings")
         // --- CLAVE AÑADIDA ---
         val FINAL_HUAWEI_ALARM_TIME = stringPreferencesKey("final_huawei_alarm_time")
+        val KEY_LAST_ACTIVITY = longPreferencesKey("last_activity_time")
     }
 
     // El flujo de datos se lee directamente desde DataStore, que maneja la carga y observación automáticamente.
@@ -117,5 +119,15 @@ class PreferencesRepositoryImpl @Inject constructor(
             .putLong("last_successful_run", timestamp)
             .putBoolean("is_first_time_user", false)
             .apply()
+    }
+
+    override fun getLastActivityTime(): Flow<Long> = context.dataStore.data.map { prefs ->
+        prefs[PreferenceKeys.KEY_LAST_ACTIVITY] ?: System.currentTimeMillis()
+    }
+
+    override suspend fun updateLastActivityTime(timestamp: Long) {
+        context.dataStore.edit { prefs ->
+            prefs[PreferenceKeys.KEY_LAST_ACTIVITY] = timestamp
+        }
     }
 }

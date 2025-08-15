@@ -36,6 +36,7 @@ import com.chapelotas.app.presentation.ui.home.components.*
 import com.chapelotas.app.presentation.viewmodels.DisplayableItem
 import com.chapelotas.app.presentation.viewmodels.MainViewModel
 import kotlinx.coroutines.delay
+import java.time.Duration
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -51,6 +52,7 @@ fun HomeScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val items by viewModel.todayItems.collectAsStateWithLifecycle()
+    val showNewDayDialog by viewModel.showNewDayDialog.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var showMenu by remember { mutableStateOf(false) }
     val lazyListState = rememberLazyListState()
@@ -73,6 +75,46 @@ fun HomeScreen(
     }
     val pendingTodosCount = items.count {
         it is DisplayableItem.Todo && !it.task.isFinished
+    }
+
+    // NUEVO: Diálogo de nuevo día
+    if (showNewDayDialog) {
+        AlertDialog(
+            onDismissRequest = { viewModel.onNewDayRefreshDismissed() },
+            icon = {
+                Icon(
+                    imageVector = Icons.Default.Refresh,
+                    contentDescription = "Nuevo día",
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            },
+            title = {
+                Text(
+                    text = "¡Ha comenzado un nuevo día!",
+                    style = MaterialTheme.typography.headlineSmall
+                )
+            },
+            text = {
+                Text(
+                    text = "¿Querés actualizar las tareas para ver las de hoy?",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = { viewModel.onNewDayRefreshAccepted() }
+                ) {
+                    Text("Actualizar")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { viewModel.onNewDayRefreshDismissed() }
+                ) {
+                    Text("Ahora no")
+                }
+            }
+        )
     }
 
     if (uiState.showBatteryProtectionDialog) {

@@ -4,20 +4,13 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.util.Log
+import androidx.work.*
 import com.chapelotas.app.di.Constants
-import com.chapelotas.app.domain.usecases.ReminderEngine
 import dagger.hilt.android.AndroidEntryPoint
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import javax.inject.Inject
+import java.util.concurrent.TimeUnit
 
 @AndroidEntryPoint
 class NotificationAlarmReceiver : BroadcastReceiver() {
-
-    @Inject
-    lateinit var reminderEngine: ReminderEngine
-    private val scope = CoroutineScope(Dispatchers.IO)
 
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action == Constants.ACTION_TRIGGER_REMINDER) {
@@ -27,22 +20,30 @@ class NotificationAlarmReceiver : BroadcastReceiver() {
                 return
             }
 
-            Log.d("AlarmReceiver", "⏰ ¡Timbre sonó! La alarma para la tarea '$taskId' fue recibida.")
+            Log.d("AlarmReceiver", "⏰ ¡Timbre sonó! Alarma para tarea '$taskId'")
 
-            val pendingResult = goAsync()
+            // CAMBIO CRÍTICO: Usar WorkManager para garantizar que el trabajo se complete
+            // incluso si el sistema mata el BroadcastReceiver
+            val workRequest = OneTimeWorkRequestBuilder<ProcessReminderWorker>()
+                .setInputData(
+                    workDataOf(Constants.EXTRA_TASK_ID to taskId)
+                )
+                .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+                .setBackoffCriteria(
+                    BackoffPolicy.EXPONENTIAL,
+                    1,
+                    TimeUnit.MINUTES
+                )
+                .build()
 
-            scope.launch {
-                try {
-                    Log.d("AlarmReceiver", "Delegando trabajo al ReminderEngine.")
-                    reminderEngine.processAndSendReminder(taskId)
-                } catch(e: Exception) {
-                    Log.e("AlarmReceiver", "Error al procesar la alarma para la tarea $taskId", e)
-                }
-                finally {
-                    pendingResult.finish()
-                    Log.d("AlarmReceiver", "Trabajo finalizado para la tarea '$taskId'.")
-                }
-            }
+            WorkManager.getInstance(context)
+                .enqueueUniqueWork(
+                    "reminder_$taskId",
+                    ExistingWorkPolicy.REPLACE,
+                    workRequest
+                )
+
+            Log.d("AlarmReceiver", "✅ Trabajo encolado en WorkManager para tarea '$taskId'")
         }
     }
 }

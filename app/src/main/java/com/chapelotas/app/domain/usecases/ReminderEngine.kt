@@ -7,6 +7,10 @@ import com.chapelotas.app.di.Constants
 import com.chapelotas.app.domain.debug.DebugLog
 import com.chapelotas.app.domain.entities.ChapelotasNotification
 import com.chapelotas.app.domain.entities.NotificationAction
+import com.chapelotas.app.domain.events.EventBus
+import com.chapelotas.app.domain.events.TaskEvent
+import com.chapelotas.app.domain.events.CalendarEvent
+import com.chapelotas.app.domain.events.SystemEvent
 import com.chapelotas.app.domain.models.*
 import com.chapelotas.app.domain.personality.PersonalityProvider
 import com.chapelotas.app.domain.repositories.NotificationRepository
@@ -34,6 +38,7 @@ class ReminderEngine @Inject constructor(
     private val debugLog: DebugLog,
     private val personalityProvider: PersonalityProvider,
     private val huaweiWakeUpManager: HuaweiWakeUpManager,
+    private val eventBus: EventBus,
     @ApplicationContext private val context: Context
 ) {
     private val coroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -44,7 +49,7 @@ class ReminderEngine @Inject constructor(
     private val settings: StateFlow<AppSettings> = preferencesRepository.observeAppSettings()
         .catch { e ->
             debugLog.add("❌ ENGINE: Error observando configuración: ${e.message}")
-            emit(AppSettings()) // Emit default settings on error
+            emit(AppSettings())
         }
         .stateIn(
             scope = coroutineScope,
@@ -60,6 +65,54 @@ class ReminderEngine @Inject constructor(
         private const val PROCESSING_TIMEOUT_MS = 30000L
         private const val RETRY_DELAY_MS = 1000L
         private const val MAX_RETRIES = 3
+        private const val NOTIFICATION_WINDOW_MINUTES = 90L
+        private const val EARLY_MORNING_WINDOW_HOURS = 12L
+    }
+
+    init {
+        subscribeToEvents()
+    }
+
+    private fun subscribeToEvents() {
+        // Escuchar cambios en tareas
+        coroutineScope.launch {
+            eventBus.taskEvents.collect { event ->
+                when (event) {
+                    is TaskEvent.TaskUpdated -> {
+                        if (event.field == "locationContext" || event.field == "travelTime") {
+                            debugLog.add("🔄 ENGINE: Detectado cambio de ubicación/viaje en tarea ${event.taskId}")
+                            reprogramTaskReminder(event.taskId)
+                        }
+                    }
+                    is TaskEvent.TaskStatusChanged -> {
+                        if (!event.isFinished) {
+                            debugLog.add("🔄 ENGINE: Tarea ${event.taskId} reabierta, reprogramando")
+                            reprogramTaskReminder(event.taskId)
+                        }
+                    }
+                    is TaskEvent.TaskCreated -> {
+                        debugLog.add("🔄 ENGINE: Nueva tarea creada ${event.taskId}, programando recordatorios")
+                        delay(500) // Pequeño delay para asegurar que la BD esté actualizada
+                        reprogramTaskReminder(event.taskId)
+                    }
+                    else -> {}
+                }
+            }
+        }
+    }
+
+    private suspend fun reprogramTaskReminder(taskId: String) {
+        try {
+            val task = taskRepository.getTask(taskId)
+            if (task != null && !task.isFinished) {
+                val currentSettings = settings.value
+                val nextReminder = getNextReminderTime(task, currentSettings)
+                debugLog.add("🔄 ENGINE: Reprogramando tarea '${task.title}' -> próximo: ${nextReminder?.format(timeFormatter) ?: "NINGUNO"}")
+                scheduleNextReminder(task, nextReminder)
+            }
+        } catch (e: Exception) {
+            debugLog.add("❌ ENGINE: Error reprogramando tarea $taskId: ${e.message}")
+        }
     }
 
     suspend fun processAndSendReminder(taskId: String) {
@@ -68,7 +121,9 @@ class ReminderEngine @Inject constructor(
             return
         }
 
-        // Prevent duplicate processing of the same task
+        // Verificar si necesitamos despertar
+        wakeUpIfNeeded()
+
         val existingJob = processingTasks[taskId]
         if (existingJob?.isActive == true) {
             debugLog.add("⚠️ ENGINE: Tarea '$taskId' ya está siendo procesada")
@@ -99,18 +154,16 @@ class ReminderEngine @Inject constructor(
         repeat(MAX_RETRIES) { attempt ->
             try {
                 processReminderInternal(taskId)
-                return // Success, exit retry loop
+                return
             } catch (e: Exception) {
                 lastException = e
                 debugLog.add("❌ ENGINE: Error en intento ${attempt + 1}/$MAX_RETRIES para tarea '$taskId': ${e.message}")
-
                 if (attempt < MAX_RETRIES - 1) {
-                    delay(RETRY_DELAY_MS * (attempt + 1)) // Exponential backoff
+                    delay(RETRY_DELAY_MS * (attempt + 1))
                 }
             }
         }
 
-        // All retries failed
         debugLog.add("💀 ENGINE: Falló el procesamiento de tarea '$taskId' después de $MAX_RETRIES intentos: ${lastException?.message}")
     }
 
@@ -120,14 +173,12 @@ class ReminderEngine @Inject constructor(
         val task = getTaskIfValid(taskId) ?: return
         val settingsValue = settings.value
 
-        // Check if task is for a future date
-        if (task.scheduledTime.toLocalDate().isAfter(LocalDate.now())) {
-            debugLog.add("📅 ENGINE: Alarma disparada para tarea futura ('${task.title}'). No se notifica, solo se reprograma.")
+        if (!shouldSendNotification(task)) {
+            debugLog.add("⭕️ ENGINE: Notificación suprimida para '${task.title}' (fuera de ventana válida)")
             rescheduleTaskReminder(task, settingsValue)
             return
         }
 
-        // Check work hours
         if (isOutsideWorkHours(task, settingsValue)) {
             debugLog.add("🌙 ENGINE: Fuera de horario laboral. Notificación para '${task.title}' suprimida.")
             rescheduleTaskReminder(task, settingsValue)
@@ -148,11 +199,96 @@ class ReminderEngine @Inject constructor(
 
         debugLog.add("💬 ENGINE: Mensaje generado: '$message'")
 
-        // Send notification
         sendNotificationSafely(task, message, strategy.actions)
-
-        // Schedule next reminder
         rescheduleTaskReminder(task, settingsValue)
+    }
+
+    // FUNCIÓN MEJORADA CON VENTANAS AMPLIADAS
+    private fun shouldSendNotification(task: Task): Boolean {
+        val now = LocalDateTime.now()
+        val minutesUntilEvent = ChronoUnit.MINUTES.between(now, task.scheduledTime)
+
+        debugLog.add("⏱️ ENGINE: Verificando ventana para '${task.title}'")
+        debugLog.add("   - Hora actual: ${now.format(timeFormatter)}")
+        debugLog.add("   - Hora del evento: ${task.scheduledTime.format(timeFormatter)}")
+        debugLog.add("   - Minutos hasta evento: $minutesUntilEvent")
+
+        // Para TODOs, siempre permitir si es del día actual
+        if (task.isTodo && task.scheduledTime.toLocalDate() == LocalDate.now()) {
+            debugLog.add("✅ ENGINE: TODO del día actual, permitiendo notificación")
+            return true
+        }
+
+        // Ventana ampliada para eventos próximos
+        // Permitir notificaciones desde 2 horas antes hasta 12 horas después
+        if (minutesUntilEvent in -720..120) { // -12 horas a +2 horas
+            debugLog.add("✅ ENGINE: Dentro de ventana ampliada de notificación")
+            return true
+        }
+
+        // Para eventos de mañana temprano (primeras 8 AM)
+        if (task.scheduledTime.toLocalDate() == LocalDate.now().plusDays(1)) {
+            val eventHour = task.scheduledTime.toLocalTime().hour
+            if (eventHour < 8) {
+                debugLog.add("🌙 ENGINE: Evento de mañana temprano (antes de 8 AM), permitiendo")
+                return true
+            }
+        }
+
+        // Si es un evento ya iniciado pero no reconocido
+        if (task.status == TaskStatus.ONGOING && !task.isAcknowledged) {
+            debugLog.add("⚠️ ENGINE: Evento en curso no reconocido, forzando notificación")
+            return true
+        }
+
+        // Si es un evento retrasado del día actual
+        if (task.status == TaskStatus.DELAYED &&
+            task.scheduledTime.toLocalDate() == LocalDate.now()) {
+            debugLog.add("🔴 ENGINE: Evento retrasado del día, permitiendo notificación")
+            return true
+        }
+
+        debugLog.add("❌ ENGINE: Fuera de ventanas válidas, suprimiendo notificación")
+        return false
+    }
+
+    // NUEVA FUNCIÓN PARA DETECTAR INACTIVIDAD
+    private suspend fun wakeUpIfNeeded() {
+        try {
+            val lastActivityTime = preferencesRepository.getLastActivityTime().first()
+            val now = System.currentTimeMillis()
+            val timeSinceLastActivity = now - lastActivityTime
+
+            // Si han pasado más de 2 horas sin actividad
+            if (timeSinceLastActivity > 2 * 60 * 60 * 1000) {
+                debugLog.add("😴 ENGINE: App inactiva por ${timeSinceLastActivity / 1000 / 60} minutos")
+                debugLog.add("⏰ ENGINE: Ejecutando wake-up completo...")
+
+                // Forzar una revisión completa de todas las tareas
+                val activeTasks = getAllActiveTasks()
+                for (task in activeTasks) {
+                    if (task.nextReminderAt != null &&
+                        task.nextReminderAt!!.isBefore(LocalDateTime.now()) &&
+                        !task.isFinished) {
+
+                        debugLog.add("🚨 ENGINE: Encontrado recordatorio perdido para '${task.title}'")
+                        try {
+                            // Procesar solo si no está siendo procesado
+                            if (!processingTasks.containsKey(task.id)) {
+                                processReminderInternal(task.id)
+                            }
+                        } catch (e: Exception) {
+                            debugLog.add("❌ ENGINE: Error procesando recordatorio perdido: ${e.message}")
+                        }
+                    }
+                }
+            }
+
+            // Actualizar tiempo de última actividad
+            preferencesRepository.updateLastActivityTime(now)
+        } catch (e: Exception) {
+            debugLog.add("❌ ENGINE: Error en wakeUpIfNeeded: ${e.message}")
+        }
     }
 
     private suspend fun rescheduleTaskReminder(task: Task, settings: AppSettings) {
@@ -174,7 +310,7 @@ class ReminderEngine @Inject constructor(
             strategy.getMessage(task, LocalDateTime.now(), settings, personalityProvider)
         } catch (e: Exception) {
             debugLog.add("❌ ENGINE: Error generando mensaje para '${task.title}': ${e.message}")
-            "Recordatorio: ${task.title}" // Fallback message
+            "Recordatorio: ${task.title}"
         }
     }
 
@@ -221,6 +357,9 @@ class ReminderEngine @Inject constructor(
         try {
             debugLog.add("🚀 ENGINE: ==> Inicializando/Actualizando TODAS las alarmas...")
 
+            // Primero, ejecutar wake-up si es necesario
+            wakeUpIfNeeded()
+
             val activeTasks = getAllActiveTasks()
             val currentSettings = settings.value
 
@@ -231,7 +370,6 @@ class ReminderEngine @Inject constructor(
                 return
             }
 
-            // Process tasks in batches to avoid overwhelming the system
             activeTasks.chunked(MAX_CONCURRENT_PROCESSING).forEach { batch ->
                 processTaskBatch(batch, currentSettings)
             }
@@ -280,7 +418,7 @@ class ReminderEngine @Inject constructor(
             debugLog.add("   ⚡ Actualizando recordatorio...")
             scheduleNextReminder(task, nextReminder)
         } else {
-            debugLog.add("   ✓ Recordatorio ya está actualizado")
+            debugLog.add("   ✔ Recordatorio ya está actualizado")
         }
     }
 
@@ -303,13 +441,8 @@ class ReminderEngine @Inject constructor(
             if (nextReminderTime != null && nextReminderTime.isAfter(LocalDateTime.now().minusSeconds(5))) {
                 debugLog.add("📅 ENGINE: Programando recordatorio para '${task.title}' a las ${nextReminderTime.format(timeFormatter)}")
 
-                // Schedule with notification repository
                 notificationRepository.scheduleExactReminder(task.id, nextReminderTime)
-
-                // Update task in repository
                 taskRepository.updateInitialReminderState(task.id, task.reminderCount, nextReminderTime)
-
-                // Schedule Huawei prewarming if necessary
                 huaweiWakeUpManager.schedulePrewarmingIfNecessary(task, nextReminderTime)
 
                 debugLog.add("✅ ENGINE: Recordatorio programado exitosamente")
@@ -329,7 +462,6 @@ class ReminderEngine @Inject constructor(
             debugLog.add("📤 ENGINE: Enviando notificación para '${task.title}'")
             Log.i(TAG, ">> Enviando recordatorio para '${task.title}': $message")
 
-            // Update task log
             taskRepository.addMessageToLog(task.id, message, Sender.CHAPELOTAS, incrementCounter = true)
             taskRepository.recordReminderSent(task.id, task.nextReminderAt)
 
@@ -346,6 +478,9 @@ class ReminderEngine @Inject constructor(
 
             notificationRepository.showImmediateNotification(notification)
             debugLog.add("✅ ENGINE: Notificación enviada")
+
+            // Actualizar última actividad
+            preferencesRepository.updateLastActivityTime(System.currentTimeMillis())
         } catch (e: Exception) {
             debugLog.add("❌ ENGINE: Error enviando notificación para '${task.title}': ${e.message}")
         }
@@ -383,7 +518,7 @@ class ReminderEngine @Inject constructor(
             return isOutside
         } catch (e: Exception) {
             debugLog.add("❌ ENGINE: Error verificando horario laboral: ${e.message}")
-            return false // Default to allowing notifications
+            return false
         }
     }
 
@@ -400,7 +535,7 @@ class ReminderEngine @Inject constructor(
             channel
         } catch (e: Exception) {
             debugLog.add("❌ ENGINE: Error obteniendo canal de insistencia: ${e.message}")
-            Constants.CHANNEL_ID_INSISTENCE_MEDIUM // Default fallback
+            Constants.CHANNEL_ID_INSISTENCE_MEDIUM
         }
     }
 
@@ -416,26 +551,18 @@ class ReminderEngine @Inject constructor(
             }
         } catch (e: Exception) {
             debugLog.add("❌ ENGINE: Error determinando canal de notificación: ${e.message}")
-            Constants.CHANNEL_ID_GENERAL // Default fallback
+            Constants.CHANNEL_ID_GENERAL
         }
     }
 
-    /**
-     * Clean up resources when the engine is no longer needed
-     */
     fun cleanup() {
         try {
             debugLog.add("🧹 ENGINE: Limpiando recursos...")
-
-            // Cancel all processing jobs
             processingTasks.values.forEach { job ->
                 job.cancel()
             }
             processingTasks.clear()
-
-            // Cancel the main scope
             coroutineScope.cancel()
-
             debugLog.add("✅ ENGINE: Recursos limpiados")
         } catch (e: Exception) {
             debugLog.add("❌ ENGINE: Error limpiando recursos: ${e.message}")
@@ -443,7 +570,8 @@ class ReminderEngine @Inject constructor(
     }
 }
 
-// Strategy classes remain the same but with added error handling...
+// ============= CLASES DE ESTRATEGIA (Sin cambios) =============
+
 sealed class ReminderStrategy(val actions: List<NotificationAction>) {
     abstract fun getMessage(task: Task, now: LocalDateTime, settings: AppSettings, personalityProvider: PersonalityProvider): String
     abstract fun getNextReminderTime(task: Task, now: LocalDateTime, settings: AppSettings): LocalDateTime?
@@ -467,14 +595,12 @@ sealed class ReminderStrategy(val actions: List<NotificationAction>) {
                     }
                 }
             } catch (e: Exception) {
-                // Log error and return safe fallback
                 NoReminderStrategy
             }
         }
     }
 }
 
-// Rest of the strategy classes remain the same as in your original implementation...
 class TodoReminderStrategy : ReminderStrategy(listOf(NotificationAction.FINISH_DONE)) {
     companion object {
         private const val MIN_DELAY_MINUTES = 5
@@ -507,7 +633,17 @@ class UpcomingReminderStrategy(isAcknowledged: Boolean) : AcknowledgeableReminde
     override fun getMessage(task: Task, now: LocalDateTime, settings: AppSettings, personalityProvider: PersonalityProvider): String {
         val minutesUntil = ChronoUnit.MINUTES.between(now, task.scheduledTime) + ReminderEngine.MINUTES_OFFSET_FOR_UPCOMING
         val contextKey = "upcoming_reminder.${getContextKeySuffix()}"
-        return personalityProvider.get(
+
+        val travelInfo = if (task.travelTimeMinutes > 0) {
+            val shouldLeaveIn = minutesUntil - task.travelTimeMinutes
+            when {
+                shouldLeaveIn > 10 -> " (salir en ${shouldLeaveIn} min)"
+                shouldLeaveIn > 0 -> " (¡preparate para salir!)"
+                else -> " (¡deberías estar viajando!)"
+            }
+        } else ""
+
+        val baseMessage = personalityProvider.get(
             personalityKey = settings.personalityProfile,
             contextKey = contextKey,
             placeholders = mapOf(
@@ -516,6 +652,8 @@ class UpcomingReminderStrategy(isAcknowledged: Boolean) : AcknowledgeableReminde
                 "{USER_NAME}" to settings.userName
             )
         )
+
+        return baseMessage + travelInfo
     }
 
     override fun getNextReminderTime(task: Task, now: LocalDateTime, settings: AppSettings): LocalDateTime? {

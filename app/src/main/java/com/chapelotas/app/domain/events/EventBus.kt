@@ -102,10 +102,13 @@ sealed class SystemEvent : AppEvent {
     object AppStarted : SystemEvent()
     object AppResumed : SystemEvent()
     object AppPaused : SystemEvent()
+    object DayChanged : SystemEvent()
 
-    // --- INICIO DE LA MODIFICACIÓN ---
-    object SettingsChanged : SystemEvent() // Nuevo evento
-    // --- FIN DE LA MODIFICACIÓN ---
+    // --- ✅ CAMBIO PRINCIPAL AQUÍ ---
+    // Reemplazamos el evento genérico por eventos específicos.
+    object AlarmSettingsChanged : SystemEvent()
+    object PersonalitySettingsChanged : SystemEvent()
+    // --- FIN DEL CAMBIO ---
 
     data class PermissionGranted(
         val permission: String

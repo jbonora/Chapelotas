@@ -5,11 +5,8 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,12 +20,10 @@ import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Divider
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarDefaults
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -41,11 +36,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import androidx.lifecycle.lifecycleScope
 import androidx.navigation.NavController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -54,10 +47,12 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.chapelotas.app.di.Constants
+import com.chapelotas.app.domain.debug.DebugLog
+import com.chapelotas.app.domain.repositories.PreferencesRepository
+import com.chapelotas.app.presentation.ui.PersonalityManagerScreen
 import com.chapelotas.app.presentation.ui.SettingsScreen
 import com.chapelotas.app.presentation.ui.TaskDetailScreen
 import com.chapelotas.app.presentation.ui.TomorrowScreen
-// import com.chapelotas.app.presentation.ui.DebugScreen  // Comentado si da error
 import com.chapelotas.app.presentation.ui.home.HomeScreen
 import com.chapelotas.app.presentation.ui.home.SevenDaysScreen
 import com.chapelotas.app.presentation.ui.setup.SetupScreen
@@ -65,11 +60,24 @@ import com.chapelotas.app.presentation.ui.theme.ChapelotasTheme
 import com.chapelotas.app.presentation.viewmodels.RootViewEvent
 import com.chapelotas.app.presentation.viewmodels.RootViewModel
 import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
     private val rootViewModel: RootViewModel by viewModels()
+
+    @Inject
+    lateinit var preferencesRepository: PreferencesRepository
+
+    @Inject
+    lateinit var debugLog: DebugLog
+
+    private var heartbeatJob: Job? = null
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
@@ -111,6 +119,60 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+        // Iniciar heartbeat de actividad
+        startActivityHeartbeat()
+    }
+
+    override fun onResume() {
+        super.onResume()
+
+        // Marcar actividad inmediatamente
+        lifecycleScope.launch {
+            preferencesRepository.updateLastActivityTime(System.currentTimeMillis())
+            debugLog.add("📱 ACTIVITY: App en primer plano")
+        }
+
+        // Reiniciar heartbeat si estaba detenido
+        if (heartbeatJob?.isActive != true) {
+            startActivityHeartbeat()
+        }
+    }
+
+    override fun onPause() {
+        super.onPause()
+
+        lifecycleScope.launch {
+            debugLog.add("📱 ACTIVITY: App en background")
+        }
+        // NO detenemos el heartbeat - queremos que siga corriendo
+    }
+
+    override fun onDestroy() {
+        heartbeatJob?.cancel()
+        super.onDestroy()
+    }
+
+    private fun startActivityHeartbeat() {
+        heartbeatJob?.cancel()
+        heartbeatJob = lifecycleScope.launch {
+            while (isActive) {
+                try {
+                    // Actualizar cada 30 segundos mientras la app esté viva
+                    delay(30_000)
+
+                    preferencesRepository.updateLastActivityTime(System.currentTimeMillis())
+
+                    // Log cada 5 minutos para no llenar el debug
+                    if (System.currentTimeMillis() % 300_000 < 30_000) {
+                        debugLog.add("💓 ACTIVITY: Heartbeat - App activa")
+                    }
+                } catch (e: Exception) {
+                    debugLog.add("❌ ACTIVITY: Error en heartbeat: ${e.message}")
+                }
+            }
+        }
+
+        debugLog.add("💓 ACTIVITY: Heartbeat iniciado")
     }
 }
 
@@ -191,22 +253,21 @@ fun MainNavigationContainer(
             composable("seven_days") {
                 SevenDaysScreen(
                     navController = navController
-                    // Comentado hasta que actualices SevenDaysScreen:
-                    // onScrollChanged = { scrolled -> isScrolled = scrolled }
                 )
             }
             composable("tomorrow_debug") {
                 TomorrowScreen()
             }
             composable("debug") {
-                // Si DebugScreen no existe, usar un placeholder temporal:
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text("Debug Screen")
                 }
-                // DebugScreen()  // Descomentar cuando exista
             }
             composable("settings") {
                 SettingsScreen(navController = navController)
+            }
+            composable("personality_manager") {
+                PersonalityManagerScreen(navController = navController)
             }
             composable(
                 route = "task_detail/{taskId}",
@@ -222,9 +283,8 @@ fun MainNavigationContainer(
 @Composable
 fun AppBottomNavBar(
     navController: NavController,
-    hasContentBelow: Boolean = false  // true = hay flechita abajo = mostrar línea
+    hasContentBelow: Boolean = false
 ) {
-    // Animación suave igual que las flechitas
     val lineAlpha by animateFloatAsState(
         targetValue = if (hasContentBelow) 1f else 0f,
         animationSpec = tween(200),
@@ -232,7 +292,6 @@ fun AppBottomNavBar(
     )
 
     Column {
-        // Línea superior que aparece cuando hay flechita de scroll abajo
         Box(
             modifier = Modifier
                 .fillMaxWidth()

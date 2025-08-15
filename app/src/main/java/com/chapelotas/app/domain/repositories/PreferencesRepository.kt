@@ -37,4 +37,8 @@ interface PreferencesRepository {
     fun getFinalHuaweiAlarmTime(): Flow<LocalDateTime?>
     suspend fun clearFinalHuaweiAlarmTime()
     // --- FIN DE FUNCIONES AÑADIDAS ---
+
+    // Nuevos métodos para tracking de actividad
+    fun getLastActivityTime(): Flow<Long>
+    suspend fun updateLastActivityTime(timestamp: Long)
 }

@@ -57,6 +57,93 @@
         "¡Aleluya! Tarea '{TASK_NAME}' finalizada. No pensé que viviría para verlo.",
         "Bien hecho, supongo. Una menos.",
         "Ok, {USER_NAME}, tarea terminada. ¿Ahora qué? ¿Un helado?"
+      ],
+      "reset": [
+        "Dale, la reabrimos. '{TASK_NAME}' vuelve a la cancha.",
+        "Ok, '{TASK_NAME}' otra vez en juego. Segunda oportunidad."
+      ]
+    }
+  },
+  "diego_sarcastic": {
+    "displayName": "El Diego",
+    "description": "Elegí. O me tenés a mí, o tenés un problema.",
+    "alarm_greeting": {
+      "options": [
+        "Arriba, campeón. Hoy el sol salió porque yo quise. A ver si aprovechás.",
+        "Dale, {USER_NAME}, despertate que se te escapa la tortuga. El mundo es de los vivos.",
+        "¿Seguís durmiendo? Yo a tu edad ya había gambeteado a medio equipo inglés. ¡Movete!",
+        "¡Eeeeeeeh! A levantarse. Hoy puede ser un gran día. O no. Depende de vos, papá.",
+        "Sonó el despertador. ¿Necesitás que te tire un centro para que te levantes?",
+        "Buen día, fenómeno. Afuera la gente normal ya está laburando. Vos fijate.",
+        "Despertate, crack. La cama es para los tibios."
+      ]
+    },
+    "upcoming_reminder": {
+      "unacknowledged": [
+        "Che, pibe, en {MINUTES} minutos arranca el partido de '{TASK_NAME}'. Entrá en calor.",
+        "Faltan {MINUTES} minutos para '{TASK_NAME}'. ¿Estás o te fuiste a cortar el pelo?",
+        "Ojo, {USER_NAME}, que en {MINUTES} minutos tenés '{TASK_NAME}'. Después no me vengas a llorar al campito.",
+        "Escuchame, máquina. En {MINUTES} minutos tenés que estar para '{TASK_NAME}'. ¿Se entiende?",
+        "La pelota ya está por rodar para '{TASK_NAME}'. Tenés {MINUTES} minutos para ponerte los cortos.",
+        "Tic, toc, barrilete cósmico. {MINUTES} minutos para '{TASK_NAME}'. No te duermas en los laureles."
+      ],
+      "acknowledged": [
+        "Ya sé que me la tocaste de primera con '{TASK_NAME}', pero te aviso de nuevo. Faltan {MINUTES} minutos, por las dudas.",
+        "Me dijiste 'Entendido' para '{TASK_NAME}', pero te conozco. En {MINUTES} minutos, ¿eh? No me falles.",
+        "Tranquilo, fiera, yo te cubro la espalda. '{TASK_NAME}' en {MINUTES} minutos. Vos dedicate a jugar.",
+        "Te la dejo picando: '{TASK_NAME}' en {MINUTES} minutos. Ya me dijiste que sí, así que ahora cumplí.",
+        "Confío en tu palabra, {USER_NAME}. Pero igual, '{TASK_NAME}' en {MINUTES} minutos. Que no se te escape."
+      ]
+    },
+    "ongoing_reminder": {
+      "unacknowledged": [
+        "¡Arrancó '{TASK_NAME}' y vos seguís en el banco! Dale, {USER_NAME}, entrá a la cancha.",
+        "Che, ya empezó '{TASK_NAME}'. ¿Qué te pasa? ¿Estás más lento que un 5 de área inglés?",
+        "Te estoy hablando a vos, {USER_NAME}. '{TASK_NAME}' ya está en juego. ¿La vas a mirar de afuera?",
+        "Mirá que la pelota no se mancha, pero la paciencia sí. Ya es hora de '{TASK_NAME}'.",
+        "¿Necesitás un pase al pie? Ya deberías estar con '{TASK_NAME}'. Movete, nene."
+      ],
+      "acknowledged": [
+        "Dale, seguí así con '{TASK_NAME}'. Conmigo de 10, vos jugás de 9.",
+        "Así me gusta, metiéndole garra a '{TASK_NAME}'. ¡Seguí, seguí!",
+        "Estamos en pleno partido con '{TASK_NAME}'. No aflojes ahora que te estoy mirando.",
+        "Perfecto, {USER_NAME}. La estás rompiendo con '{TASK_NAME}'.",
+        "Vamos que vamos con '{TASK_NAME}'. Estás jugando para la historia, papá."
+      ]
+    },
+    "delayed_reminder": {
+      "unacknowledged": [
+        "A '{TASK_NAME}' se le escapó la tortuga, {USER_NAME}. Un desastre, te digo.",
+        "Llegaste más tarde que el VAR a una jugada clara. '{TASK_NAME}' ya fue.",
+        "¿Viste pasar a '{TASK_NAME}'? Porque ya se fue. Estabas durmiendo la siesta parece.",
+        "Felicitaciones, {USER_NAME}. Te comiste el amague con '{TASK_NAME}'. Ya pasó de largo.",
+        "Che, ¿la seguís buscando a '{TASK_NAME}'? Ya terminó el primer tiempo y vos ni entraste."
+      ],
+      "acknowledged": [
+        "Seguís colgado con '{TASK_NAME}', ¿no? Dale, definí el partido de una vez.",
+        "Esto ya es alargue y penales para '{TASK_NAME}'. ¿Vas a patear o vas a arrugar?",
+        "Mirá que si seguís así con '{TASK_NAME}', te saco y pongo a otro. ¡Apurate!",
+        "La tarea '{TASK_NAME}' está más demorada que un tren en hora pico. Dale, metele pata.",
+        "¿Qué pasa, {USER_NAME}? ¿Se te cansaron las piernas con '{TASK_NAME}'? ¡Dale que falta poco!"
+      ]
+    },
+    "action_confirmation": {
+      "acknowledge": [
+        "Listo, pá. Entendido. Ahora andá y hacelo.",
+        "Tocado. La pelota está de tu lado ahora.",
+        "Dale. Ya te anoté el 'ok'. Ahora demostrá."
+      ],
+      "finish": [
+        "¡GOLAZO, {USER_NAME}! Tarea '{TASK_NAME}' liquidada. Andá a festejar al Obelisco.",
+        "¡La colgaste de un ángulo! '{TASK_NAME}' está adentro. ¡Qué viva el fútbol!",
+        "Listo el pollo. Tarea '{TASK_NAME}' finalizada. Sos un crack.",
+        "¡Señoras y señores, {USER_NAME} ha completado '{TASK_NAME}'! El país festeja.",
+        "Así se hace, carajo. '{TASK_NAME}' terminada. Impecable."
+      ],
+      "reset": [
+        "¿Qué pasó, te equivocaste? Dale, '{TASK_NAME}' vuelve a la cancha.",
+        "Ok, borrón y cuenta nueva con '{TASK_NAME}'. Pero que sea la última vez, ¿eh?",
+        "Listo, te doy otra oportunidad con '{TASK_NAME}'. No la desaproveches."
       ]
     }
   }

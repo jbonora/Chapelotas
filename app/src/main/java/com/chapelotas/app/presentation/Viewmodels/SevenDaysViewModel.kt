@@ -16,12 +16,27 @@ import java.time.LocalDate
 import java.time.LocalTime
 import javax.inject.Inject
 
+// --- NUEVOS DATA CLASSES PARA REPRESENTAR EL HORARIO ---
+
+// Representa un hueco libre y clickeable
 data class TimeSlot(
     val start: LocalTime,
     val end: LocalTime,
     val description: String,
     val durationMinutes: Long
 )
+
+// Sealed interface para los items del horario
+sealed class ScheduleItem {
+    data class Free(val slot: TimeSlot) : ScheduleItem()
+    data class Busy(
+        val taskTitle: String,
+        val start: LocalTime,
+        val end: LocalTime,
+        val description: String // e.g., "Viaje", "Reunión"
+    ) : ScheduleItem()
+}
+
 
 enum class BlockStatus {
     HAS_SLOTS,
@@ -30,9 +45,10 @@ enum class BlockStatus {
     IN_THE_PAST
 }
 
+// TimeBlock ahora contiene una lista de ScheduleItem
 data class TimeBlock(
     val status: BlockStatus,
-    val slots: List<TimeSlot> = emptyList()
+    val items: List<ScheduleItem> = emptyList()
 )
 
 data class DailySchedule(
@@ -97,66 +113,92 @@ class SevenDaysViewModel @Inject constructor(
             val currentDate = today.plusDays(i.toLong())
             val tasksForDay = tasks.filter { it.scheduledTime.toLocalDate() == currentDate }
 
-            val allFreeSlotsForDay = getFreeTimeSlotsForDay(workStart, workEnd, tasksForDay)
+            val allScheduleItems = buildCombinedScheduleForDay(workStart, workEnd, tasksForDay)
 
             scheduleByDay[currentDate] = DailySchedule(
-                morning = getTimeBlockForPeriod(currentDate, workStart, lunchStart, allFreeSlotsForDay, tasksForDay),
-                lunch = getTimeBlockForPeriod(currentDate, lunchStart, lunchEnd, allFreeSlotsForDay, tasksForDay),
-                afternoon = getTimeBlockForPeriod(currentDate, lunchEnd, dinnerStart, allFreeSlotsForDay, tasksForDay),
-                dinner = getTimeBlockForPeriod(currentDate, dinnerStart, dinnerEnd, allFreeSlotsForDay, tasksForDay),
-                night = getTimeBlockForPeriod(currentDate, dinnerEnd, workEnd, allFreeSlotsForDay, tasksForDay)
+                morning = getTimeBlockForPeriod(currentDate, workStart, lunchStart, allScheduleItems),
+                lunch = getTimeBlockForPeriod(currentDate, lunchStart, lunchEnd, allScheduleItems),
+                afternoon = getTimeBlockForPeriod(currentDate, lunchEnd, dinnerStart, allScheduleItems),
+                dinner = getTimeBlockForPeriod(currentDate, dinnerStart, dinnerEnd, allScheduleItems),
+                night = getTimeBlockForPeriod(currentDate, dinnerEnd, workEnd, allScheduleItems)
             )
         }
         return scheduleByDay
     }
 
-    private fun getFreeTimeSlotsForDay(
+    private fun buildCombinedScheduleForDay(
         workStart: LocalTime,
         workEnd: LocalTime,
         tasks: List<Task>
-    ): List<TimeSlot> {
+    ): List<ScheduleItem> {
         if (!workStart.isBefore(workEnd)) return emptyList()
 
-        val busyPeriods = tasks.map {
-            val taskEnd = it.endTime?.toLocalTime() ?: it.scheduledTime.toLocalTime().plusHours(1)
-            val taskStartWithTravel = it.scheduledTime.toLocalTime().minusMinutes(it.travelTimeMinutes.toLong())
-            val taskEndWithTravel = taskEnd.plusMinutes(it.travelTimeMinutes.toLong())
-            Pair(taskStartWithTravel, taskEndWithTravel)
-        }.sortedBy { it.first }
+        // 1. Crear una lista de todos los bloques ocupados (viajes y eventos)
+        val busyBlocks = tasks.flatMap { task ->
+            val taskStart = task.scheduledTime.toLocalTime()
+            val taskEnd = task.endTime?.toLocalTime() ?: taskStart.plusHours(1)
+            val travel = task.travelTimeMinutes.toLong()
+            val travelStartTime = taskStart.minusMinutes(travel)
+            val travelEndTime = taskEnd.plusMinutes(travel)
 
-        val mergedBusyPeriods = mutableListOf<Pair<LocalTime, LocalTime>>()
-        for (period in busyPeriods) {
-            if (mergedBusyPeriods.isEmpty() || period.first.isAfter(mergedBusyPeriods.last().second)) {
-                mergedBusyPeriods.add(period)
+            listOfNotNull(
+                // Viaje de ida
+                if (travel > 0) ScheduleItem.Busy(task.title, travelStartTime, taskStart, "Viaje ida") else null,
+                // Evento
+                ScheduleItem.Busy(task.title, taskStart, taskEnd, task.title.split(" ").take(3).joinToString(" ")),
+                // Viaje de vuelta
+                if (travel > 0) ScheduleItem.Busy(task.title, taskEnd, travelEndTime, "Viaje vuelta") else null
+            )
+        }.sortedBy { it.start }
+
+        // 2. Fusionar bloques ocupados que se solapan
+        val mergedBusyBlocks = mutableListOf<ScheduleItem.Busy>()
+        for (block in busyBlocks) {
+            if (mergedBusyBlocks.isEmpty() || block.start >= mergedBusyBlocks.last().end) {
+                mergedBusyBlocks.add(block)
             } else {
-                val last = mergedBusyPeriods.last()
-                mergedBusyPeriods[mergedBusyPeriods.lastIndex] = Pair(last.first, maxOf(last.second, period.second))
+                // --- CORRECCIÓN AQUÍ ---
+                // Se reemplaza removeLast() por una alternativa más segura
+                val last = mergedBusyBlocks.removeAt(mergedBusyBlocks.lastIndex)
+                val newEnd = if (block.end.isAfter(last.end)) block.end else last.end
+                // Si se fusionan, priorizamos mostrar el nombre del evento principal
+                val newDescription = if (last.description.startsWith("Viaje") && !block.description.startsWith("Viaje")) {
+                    block.description
+                } else {
+                    last.description
+                }
+                mergedBusyBlocks.add(last.copy(end = newEnd, description = newDescription))
             }
         }
 
-        val freePeriods = mutableListOf<TimeSlot>()
-        var lastEndTime = workStart
+        // 3. Construir la lista final combinando bloques libres y ocupados
+        val combinedSchedule = mutableListOf<ScheduleItem>()
+        var cursor = workStart
 
-        for (busyPeriod in mergedBusyPeriods) {
-            if (busyPeriod.first.isAfter(lastEndTime)) {
-                freePeriods.add(TimeSlot(lastEndTime, busyPeriod.first, "", 0))
+        for (busyBlock in mergedBusyBlocks) {
+            if (busyBlock.start > cursor) {
+                // Hay un hueco libre antes de este bloque ocupado
+                val freeSlot = TimeSlot(cursor, busyBlock.start, "", 0)
+                combinedSchedule.addAll(smartSplitSlot(freeSlot, 60, 30).map { ScheduleItem.Free(it) })
             }
-            lastEndTime = maxOf(lastEndTime, busyPeriod.second)
+            combinedSchedule.add(busyBlock)
+            cursor = busyBlock.end
         }
 
-        if (lastEndTime.isBefore(workEnd)) {
-            freePeriods.add(TimeSlot(lastEndTime, workEnd, "", 0))
+        // 4. Añadir el último hueco libre si lo hay
+        if (cursor < workEnd) {
+            val finalFreeSlot = TimeSlot(cursor, workEnd, "", 0)
+            combinedSchedule.addAll(smartSplitSlot(finalFreeSlot, 60, 30).map { ScheduleItem.Free(it) })
         }
 
-        return freePeriods.flatMap { smartSplitSlot(it, 60, 30) }
+        return combinedSchedule
     }
 
     private fun getTimeBlockForPeriod(
         currentDate: LocalDate,
         periodStart: LocalTime,
         periodEnd: LocalTime,
-        allFreeSlotsForDay: List<TimeSlot>,
-        dailyTasks: List<Task>
+        allScheduleItems: List<ScheduleItem>
     ): TimeBlock {
         val now = LocalTime.now()
 
@@ -165,27 +207,37 @@ class SevenDaysViewModel @Inject constructor(
         }
         if(!periodStart.isBefore(periodEnd)) return TimeBlock(status = BlockStatus.OUTSIDE_WORK_HOURS)
 
-        var slotsInPeriod = allFreeSlotsForDay.filter {
-            !it.start.isBefore(periodStart) && !it.end.isAfter(periodEnd)
+        var itemsInPeriod = allScheduleItems.filter { item ->
+            val itemStart = when(item) {
+                is ScheduleItem.Busy -> item.start
+                is ScheduleItem.Free -> item.slot.start
+            }
+            val itemEnd = when(item) {
+                is ScheduleItem.Busy -> item.end
+                is ScheduleItem.Free -> item.slot.end
+            }
+            itemStart < periodEnd && itemEnd > periodStart
         }
 
         if (currentDate.isEqual(today)) {
-            slotsInPeriod = slotsInPeriod.filter { it.end.isAfter(now) }
+            itemsInPeriod = itemsInPeriod.filter {
+                val itemEnd = when(it) {
+                    is ScheduleItem.Busy -> it.end
+                    is ScheduleItem.Free -> it.slot.end
+                }
+                itemEnd.isAfter(now)
+            }
         }
 
-        return if (slotsInPeriod.isNotEmpty()) {
-            TimeBlock(status = BlockStatus.HAS_SLOTS, slots = slotsInPeriod)
+        val hasFreeSlots = itemsInPeriod.any { it is ScheduleItem.Free }
+
+        return if (itemsInPeriod.isNotEmpty()) {
+            TimeBlock(
+                status = if (hasFreeSlots) BlockStatus.HAS_SLOTS else BlockStatus.FULLY_BOOKED,
+                items = itemsInPeriod
+            )
         } else {
-            val isBookedByTask = dailyTasks.any {
-                val taskStartWithTravel = it.scheduledTime.toLocalTime().minusMinutes(it.travelTimeMinutes.toLong())
-                val taskEndWithTravel = (it.endTime?.toLocalTime() ?: it.scheduledTime.toLocalTime().plusHours(1)).plusMinutes(it.travelTimeMinutes.toLong())
-                taskStartWithTravel.isBefore(periodEnd) && taskEndWithTravel.isAfter(periodStart)
-            }
-            if (isBookedByTask) {
-                TimeBlock(status = BlockStatus.FULLY_BOOKED)
-            } else {
-                TimeBlock(status = BlockStatus.HAS_SLOTS, slots = emptyList())
-            }
+            TimeBlock(status = BlockStatus.FULLY_BOOKED) // Si no hay items, está ocupado o es un periodo inválido
         }
     }
 
@@ -193,12 +245,13 @@ class SevenDaysViewModel @Inject constructor(
         val chunks = mutableListOf<TimeSlot>()
         var currentStartTime = slot.start
 
+        // Redondear al próximo cuarto de hora si es necesario
         if (currentStartTime.minute % 15 != 0) {
             currentStartTime = currentStartTime.plusMinutes(15 - (currentStartTime.minute % 15).toLong())
         }
 
+        // Rellenar hasta la próxima hora en punto
         val nextFullHour = currentStartTime.truncatedTo(java.time.temporal.ChronoUnit.HOURS).plusHours(1)
-
         if ((nextFullHour.isBefore(slot.end) || nextFullHour == slot.end) && currentStartTime.isBefore(nextFullHour) ) {
             val fragmentDuration = Duration.between(currentStartTime, nextFullHour).toMinutes()
             if (fragmentDuration >= minFragmentDurationMinutes) {
@@ -208,6 +261,7 @@ class SevenDaysViewModel @Inject constructor(
             currentStartTime = nextFullHour
         }
 
+        // Crear bloques grandes
         while (Duration.between(currentStartTime, slot.end).toMinutes() >= chunkDurationMinutes) {
             val nextEndTime = currentStartTime.plusMinutes(chunkDurationMinutes)
             if (!nextEndTime.isAfter(slot.end)) {
@@ -217,8 +271,13 @@ class SevenDaysViewModel @Inject constructor(
             currentStartTime = nextEndTime
         }
 
+        // Rellenar el fragmento restante
+        val remainingMinutes = Duration.between(currentStartTime, slot.end).toMinutes()
+        if (remainingMinutes >= minFragmentDurationMinutes) {
+            val description = "Bloque de $remainingMinutes min"
+            chunks.add(TimeSlot(currentStartTime, slot.end, description, remainingMinutes))
+        }
+
         return chunks
     }
 }
-
-private fun maxOf(a: LocalTime, b: LocalTime): LocalTime = if (a.isAfter(b)) a else b

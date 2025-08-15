@@ -7,10 +7,6 @@ import android.os.Build
 import android.util.Log
 import com.chapelotas.app.di.Constants
 
-/**
- * Receiver que inicia Chapelotas cuando el teléfono se enciende.
- * Inicia el servicio principal y la cadena de alarmas Keep-Alive.
- */
 class BootReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
@@ -22,9 +18,9 @@ class BootReceiver : BroadcastReceiver() {
             "android.intent.action.QUICKBOOT_POWERON",
             "com.htc.intent.action.QUICKBOOT_POWERON" -> {
 
-                // 1. Iniciar servicio foreground y darle la orden explícita de monitorear.
+                // 1. Iniciar el servicio foreground INMEDIATAMENTE.
+                // Esta es la acción más crítica para que la app sobreviva al reinicio.
                 val serviceIntent = Intent(context, ChapelotasNotificationService::class.java).apply {
-                    // ✅ ESTA LÍNEA YA ESTÁ CORRECTA
                     action = Constants.ACTION_START_MONITORING
                 }
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -33,10 +29,11 @@ class BootReceiver : BroadcastReceiver() {
                     context.startService(serviceIntent)
                 }
 
-                // 2. Iniciar la cadena de alarmas Keep-Alive como respaldo.
-                KeepAliveReceiver().scheduleNext(context)
+                // 2. Iniciar la cadena de alarmas Heartbeat como respaldo para el futuro.
+                // El servicio ya está en marcha, esto solo asegura que se mantenga así.
+                AppHeartbeatReceiver().scheduleNextHeartbeat(context)
 
-                Log.d("BootReceiver", "✅ Servicio (con orden de monitoreo) y cadena Keep-Alive iniciados desde boot.")
+                Log.d("BootReceiver", "✅ Servicio iniciado y cadena Heartbeat programada desde el arranque.")
             }
         }
     }
