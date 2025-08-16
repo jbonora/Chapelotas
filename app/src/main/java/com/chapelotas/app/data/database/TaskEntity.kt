@@ -34,7 +34,8 @@ data class TaskEntity(
     val locationContext: String = LocationContext.DEFAULT,
     val travelTimeMinutes: Int = 0,
     val conversationLog: String = "[]",
-    val unreadMessageCount: Int = 0
+    val unreadMessageCount: Int = 0,
+    val isAllDay: Boolean = false
 ) {
     fun toDomainModel(): Task {
         val gson = Gson()
@@ -72,9 +73,9 @@ data class TaskEntity(
             isRecurring = isRecurring,
             locationContext = locationContext,
             travelTimeMinutes = travelTimeMinutes,
-            // --- CAMBIO CLAVE: Convertimos la lista a inmutable ---
             conversationLog = log.toImmutableList(),
-            unreadMessageCount = unreadMessageCount
+            unreadMessageCount = unreadMessageCount,
+            isAllDay = isAllDay
         )
     }
 
@@ -111,7 +112,8 @@ data class TaskEntity(
                 locationContext = task.locationContext,
                 travelTimeMinutes = task.travelTimeMinutes,
                 conversationLog = logJson,
-                unreadMessageCount = task.unreadMessageCount
+                unreadMessageCount = task.unreadMessageCount,
+                isAllDay = task.isAllDay
             )
         }
 
@@ -128,7 +130,8 @@ data class TaskEntity(
             isRecurring = event.isRecurring,
             locationContext = LocationContext.DEFAULT,
             travelTimeMinutes = 0,
-            unreadMessageCount = 0
+            unreadMessageCount = 0,
+            isAllDay = event.isAllDay
         )
     }
 }

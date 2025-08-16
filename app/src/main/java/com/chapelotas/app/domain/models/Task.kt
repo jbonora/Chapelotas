@@ -43,9 +43,9 @@ data class Task(
     val isRecurring: Boolean = false,
     val locationContext: String = LocationContext.DEFAULT,
     val travelTimeMinutes: Int = 0,
-    // --- CAMBIO CLAVE: Usamos una lista inmutable para mayor estabilidad ---
     val conversationLog: ImmutableList<ConversationEntry> = persistentListOf(),
-    val unreadMessageCount: Int = 0
+    val unreadMessageCount: Int = 0,
+    val isAllDay: Boolean = false // Campo para eventos de todo el día
 ) {
     val isTodo: Boolean
         get() = taskType == TaskType.TODO

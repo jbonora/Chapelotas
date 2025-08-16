@@ -7,7 +7,7 @@ import android.content.Context
 
 @Database(
     entities = [TaskEntity::class],
-    // --- LÍNEA CORREGIDA (DE VUELTA A 1) ---
+    // Mantenemos la versión en 1, ya que con cada reinstalación se crea de cero.
     version = 1,
     exportSchema = false
 )
@@ -24,8 +24,9 @@ abstract class TaskDatabase : RoomDatabase() {
                 val instance = Room.databaseBuilder(
                     context.applicationContext,
                     TaskDatabase::class.java,
-                    "chapelotas_v2.db"
+                    "chapelotas_v2.db" // El nombre del archivo no influye en la versión
                 )
+                    // Esta línea sigue siendo útil si alguna vez olvidas desinstalar.
                     .fallbackToDestructiveMigration()
                     .build()
                 INSTANCE = instance

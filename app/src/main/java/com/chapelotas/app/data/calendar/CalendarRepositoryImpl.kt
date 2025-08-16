@@ -12,7 +12,7 @@ import android.os.Looper
 import android.provider.CalendarContract
 import android.util.Log
 import com.chapelotas.app.domain.entities.CalendarEvent
-import com.chapelotas.app.domain.models.TaskType // <-- AÑADIR IMPORT
+import com.chapelotas.app.domain.models.TaskType
 import com.chapelotas.app.domain.repositories.CalendarRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.channels.awaitClose
@@ -32,9 +32,41 @@ class CalendarRepositoryImpl @Inject constructor(
     @ApplicationContext private val context: Context
 ) : CalendarRepository {
 
-    // ... (El resto de la clase no cambia, solo la función parseEventFromCursor) ...
+    private val contentResolver: ContentResolver = context.contentResolver
+    private val criticalEventIds = mutableSetOf<Long>()
 
-    // --- FUNCIÓN MODIFICADA ---
+    companion object {
+        private val INSTANCE_PROJECTION = arrayOf(
+            CalendarContract.Instances.EVENT_ID,
+            CalendarContract.Instances.TITLE,
+            CalendarContract.Instances.DESCRIPTION,
+            CalendarContract.Instances.BEGIN,
+            CalendarContract.Instances.END,
+            CalendarContract.Instances.ALL_DAY,
+            CalendarContract.Instances.EVENT_LOCATION,
+            CalendarContract.Instances.CALENDAR_ID,
+            CalendarContract.Instances.CALENDAR_DISPLAY_NAME,
+            CalendarContract.Instances.RRULE
+        )
+        private const val EVENT_ID_INDEX = 0
+        private const val EVENT_TITLE_INDEX = 1
+        private const val EVENT_DESCRIPTION_INDEX = 2
+        private const val EVENT_START_INDEX = 3
+        private const val EVENT_END_INDEX = 4
+        private const val EVENT_ALL_DAY_INDEX = 5
+        private const val EVENT_LOCATION_INDEX = 6
+        private const val EVENT_CALENDAR_ID_INDEX = 7
+        private const val EVENT_CALENDAR_NAME_INDEX = 8
+        private const val EVENT_RRULE_INDEX = 9
+
+        private val CALENDAR_PROJECTION = arrayOf(
+            CalendarContract.Calendars._ID,
+            CalendarContract.Calendars.CALENDAR_DISPLAY_NAME
+        )
+        private const val CALENDAR_ID_INDEX = 0
+        private const val CALENDAR_NAME_INDEX = 1
+    }
+
     private fun parseEventFromCursor(cursor: Cursor): CalendarEvent {
         val id = cursor.getLong(EVENT_ID_INDEX)
         val title = cursor.getString(EVENT_TITLE_INDEX) ?: "Sin título"
@@ -47,12 +79,25 @@ class CalendarRepositoryImpl @Inject constructor(
         val calendarName = cursor.getString(EVENT_CALENDAR_NAME_INDEX) ?: "Calendar"
         val rrule = cursor.getString(EVENT_RRULE_INDEX)
 
-        // PASO 2.1: LÓGICA DE CLASIFICACIÓN BASADA EN DURACIÓN CERO.
-        // Un evento se considera un ToDo si su hora de inicio y fin son idénticas.
-        val taskType = if (startMillis == endMillis) TaskType.TODO else TaskType.EVENT
+        val taskType = if (startMillis == endMillis && !isAllDay) TaskType.TODO else TaskType.EVENT
 
-        val startTime = LocalDateTime.ofInstant(Instant.ofEpochMilli(startMillis), ZoneId.systemDefault())
-        val endTime = LocalDateTime.ofInstant(Instant.ofEpochMilli(endMillis), ZoneId.systemDefault())
+        val startTime: LocalDateTime
+        val endTime: LocalDateTime
+
+        if (isAllDay) {
+            // --- INICIO DE LA CORRECCIÓN ---
+            // 1. Interpretar el instante de tiempo en la zona horaria UTC.
+            val zonedDateTimeUTC = Instant.ofEpochMilli(startMillis).atZone(ZoneId.of("UTC"))
+            // 2. Extraer la fecha correcta (domingo).
+            val correctDate = zonedDateTimeUTC.toLocalDate()
+            // 3. Crear el inicio del día en la zona horaria local.
+            startTime = correctDate.atStartOfDay()
+            // --- FIN DE LA CORRECCIÓN ---
+            endTime = startTime.plusDays(1).minusNanos(1)
+        } else {
+            startTime = LocalDateTime.ofInstant(Instant.ofEpochMilli(startMillis), ZoneId.systemDefault())
+            endTime = LocalDateTime.ofInstant(Instant.ofEpochMilli(endMillis), ZoneId.systemDefault())
+        }
 
         return CalendarEvent(
             id = id,
@@ -60,7 +105,7 @@ class CalendarRepositoryImpl @Inject constructor(
             description = description,
             startTime = startTime,
             endTime = endTime,
-            taskType = taskType, // <-- Pasamos el tipo que acabamos de determinar
+            taskType = taskType,
             location = location,
             isAllDay = isAllDay,
             calendarId = calendarId,
@@ -70,44 +115,6 @@ class CalendarRepositoryImpl @Inject constructor(
         )
     }
 
-    // ... (El resto de las funciones de la clase se mantienen igual) ...
-
-    private val contentResolver: ContentResolver = context.contentResolver
-    private val criticalEventIds = mutableSetOf<Long>()
-
-    companion object {
-        // --- PROYECCIÓN MODIFICADA ---
-        private val INSTANCE_PROJECTION = arrayOf(
-            CalendarContract.Instances.EVENT_ID,
-            CalendarContract.Instances.TITLE,
-            CalendarContract.Instances.DESCRIPTION,
-            CalendarContract.Instances.BEGIN,
-            CalendarContract.Instances.END,
-            CalendarContract.Instances.ALL_DAY,
-            CalendarContract.Instances.EVENT_LOCATION,
-            CalendarContract.Instances.CALENDAR_ID,
-            CalendarContract.Instances.CALENDAR_DISPLAY_NAME,
-            CalendarContract.Instances.RRULE // <-- COLUMNA AÑADIDA PARA DETECTAR RECURRENCIA
-        )
-        private const val EVENT_ID_INDEX = 0
-        private const val EVENT_TITLE_INDEX = 1
-        private const val EVENT_DESCRIPTION_INDEX = 2
-        private const val EVENT_START_INDEX = 3
-        private const val EVENT_END_INDEX = 4
-        private const val EVENT_ALL_DAY_INDEX = 5
-        private const val EVENT_LOCATION_INDEX = 6
-        private const val EVENT_CALENDAR_ID_INDEX = 7
-        private const val EVENT_CALENDAR_NAME_INDEX = 8
-        private const val EVENT_RRULE_INDEX = 9 // <-- ÍNDICE AÑADIDO
-
-        private val CALENDAR_PROJECTION = arrayOf(
-            CalendarContract.Calendars._ID,
-            CalendarContract.Calendars.CALENDAR_DISPLAY_NAME
-        )
-        private const val CALENDAR_ID_INDEX = 0
-        private const val CALENDAR_NAME_INDEX = 1
-    }
-    // ... (getAvailableCalendars, getEventsForDate, getEventsInRange, observeCalendarChanges, markEventAsCritical, getCriticalEventIds no cambian) ...
     override suspend fun getAvailableCalendars(): Map<Long, String> = withContext(Dispatchers.IO) {
         val calendars = mutableMapOf<Long, String>()
         val uri: Uri = CalendarContract.Calendars.CONTENT_URI
