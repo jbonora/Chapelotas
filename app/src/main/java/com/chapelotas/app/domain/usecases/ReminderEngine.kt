@@ -570,7 +570,7 @@ class ReminderEngine @Inject constructor(
     }
 }
 
-// ============= CLASES DE ESTRATEGIA (Sin cambios) =============
+// ============= CLASES DE ESTRATEGIA (CON LÓGICA CORREGIDA) =============
 
 sealed class ReminderStrategy(val actions: List<NotificationAction>) {
     abstract fun getMessage(task: Task, now: LocalDateTime, settings: AppSettings, personalityProvider: PersonalityProvider): String
@@ -683,9 +683,45 @@ class OngoingReminderStrategy(isAcknowledged: Boolean) : AcknowledgeableReminder
         )
     }
 
-    override fun getNextReminderTime(task: Task, now: LocalDateTime, settings: AppSettings): LocalDateTime {
-        val interval = if (isAcknowledged) settings.lowUrgencyInterval.toLong() else settings.highUrgencyInterval.toLong()
-        return now.plusMinutes(interval)
+    override fun getNextReminderTime(task: Task, now: LocalDateTime, settings: AppSettings): LocalDateTime? {
+        // Si la tarea NO ha sido aceptada, mantenemos la alta insistencia (cada 1 min).
+        if (!isAcknowledged) {
+            return now.plusMinutes(settings.highUrgencyInterval.toLong())
+        }
+
+        // --- INICIO DE LA NUEVA LÓGICA ---
+        // Si la tarea FUE aceptada, calculamos una serie de puntos de control fijos.
+
+        val startTime = task.scheduledTime
+        val endTime = task.endTime ?: startTime.plusHours(1)
+        val lowInsistenceInterval = settings.lowUrgencyInterval.toLong()
+
+        // 1. Crear una lista de todos los posibles puntos de notificación.
+        val potentialReminderTimes = mutableListOf<LocalDateTime>()
+
+        // 2. Añadir puntos de control intermedios basados en el intervalo de baja insistencia.
+        var nextCheckpoint = startTime.plusMinutes(lowInsistenceInterval)
+        while (nextCheckpoint.isBefore(endTime)) {
+            potentialReminderTimes.add(nextCheckpoint)
+            nextCheckpoint = nextCheckpoint.plusMinutes(lowInsistenceInterval)
+        }
+
+        // 3. ¡CRÍTICO! Añadir el guardián para la transición a "Demorada".
+        // Se ejecutará 1 minuto después de que la tarea debería haber terminado.
+        potentialReminderTimes.add(endTime.plusMinutes(1))
+
+        // 4. De todos los puntos calculados, encontrar el primero que sea en el futuro.
+        val nextReminder = potentialReminderTimes.firstOrNull { it.isAfter(now) }
+
+        return if (nextReminder != null) {
+            // Encontramos el próximo punto de control programado.
+            nextReminder
+        } else {
+            // Si no hay más puntos de control futuros (ya pasaron todos),
+            // significa que la tarea está oficialmente demorada y pasamos a alta insistencia.
+            now.plusMinutes(settings.highUrgencyInterval.toLong())
+        }
+        // --- FIN DE LA NUEVA LÓGICA ---
     }
 }
 

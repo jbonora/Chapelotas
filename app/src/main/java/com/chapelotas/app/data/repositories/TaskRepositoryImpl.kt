@@ -48,19 +48,17 @@ class TaskRepositoryImpl @Inject constructor(
         taskDao.resetUnreadMessageCount(taskId, System.currentTimeMillis())
     }
 
-    override suspend fun syncWithCalendarEvents(events: List<CalendarEvent>): List<Task> {
+    override suspend fun syncWithCalendarEvents(
+        events: List<CalendarEvent>,
+        startDate: LocalDate,
+        endDate: LocalDate
+    ): List<Task> {
         deleteOutdatedUnfinishedTasks()
 
         val newTasks = mutableListOf<Task>()
-        if (events.isEmpty()) {
-            return newTasks
-        }
 
-        val minDate = events.minOf { it.startTime }.toLocalDate()
-        val maxDate = events.maxOf { it.startTime }.toLocalDate()
-
-        val startOfDay = minDate.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
-        val endOfDay = maxDate.plusDays(1).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+        val startOfDay = startDate.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+        val endOfDay = endDate.plusDays(1).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
         val dbTasksInRange = taskDao.getCalendarTasksForDateRange(startOfDay, endOfDay)
 
         val activeCompositeIds = events.map { "cal_${it.id}_${it.getStartMillis()}" }.toSet()
@@ -70,6 +68,10 @@ class TaskRepositoryImpl @Inject constructor(
             tasksToDelete.forEach { taskToDelete ->
                 taskDao.deleteById(taskToDelete.id)
             }
+        }
+
+        if (events.isEmpty()) {
+            return newTasks
         }
 
         events.forEach { event ->

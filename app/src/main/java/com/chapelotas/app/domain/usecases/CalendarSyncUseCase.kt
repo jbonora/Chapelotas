@@ -52,7 +52,7 @@ class CalendarSyncUseCase @Inject constructor(
                 debugLog.add("📅 SYNC: Evento: '${event.title}' - ${event.startTime}")
             }
 
-            val newTasks = taskRepository.syncWithCalendarEvents(calendarEvents)
+            val newTasks = taskRepository.syncWithCalendarEvents(calendarEvents, startDate, endDate)
 
             if (newTasks.isNotEmpty()) {
                 debugLog.add("📅 SYNC: 🟢 Detectadas ${newTasks.size} tareas NUEVAS:")

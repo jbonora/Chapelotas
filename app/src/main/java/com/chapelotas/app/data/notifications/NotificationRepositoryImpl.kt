@@ -163,6 +163,7 @@ class NotificationRepositoryImpl @Inject constructor(
         debugLog.add("📢 NOTIF: Mostrando notificación estándar - Android ID: $androidNotifId, Canal: ${notification.channelId}")
 
         val openAppIntent = Intent(context, MainActivity::class.java).apply {
+            action = "${Constants.ACTION_SHOW_TASK_DETAILS}_${notification.eventId}"
             putExtra(Constants.EXTRA_TASK_ID_TO_HIGHLIGHT, notification.eventId)
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
         }

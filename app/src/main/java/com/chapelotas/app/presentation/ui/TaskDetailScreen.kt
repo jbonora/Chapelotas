@@ -4,15 +4,12 @@ import android.content.ContentUris
 import android.content.Intent
 import android.provider.CalendarContract
 import android.widget.Toast
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Create
-import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -28,7 +25,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
 import com.chapelotas.app.domain.models.LocationContext
 import com.chapelotas.app.domain.models.Task
-import com.chapelotas.app.presentation.ui.home.components.TaskControlPanel
+import com.chapelotas.app.presentation.ui.components.TaskInteractionPanel
 import com.chapelotas.app.presentation.viewmodels.TaskDetailViewModel
 import java.time.format.DateTimeFormatter
 
@@ -39,32 +36,19 @@ fun TaskDetailScreen(
     viewModel: TaskDetailViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    var showDialog by remember { mutableStateOf(false) }
     val context = LocalContext.current
 
-    uiState.task?.let { task ->
-        if (showDialog) {
-            CustomTravelTimeDialog(
-                task = task,
-                onDismiss = { showDialog = false },
-                onConfirm = { travelTime ->
-                    viewModel.updateTaskLocation("custom", travelTime)
-                    showDialog = false
-                }
-            )
-        }
-
-        Scaffold(
-            topBar = {
-                TopAppBar(
-                    title = { Text("Detalle de Tarea") },
-                    navigationIcon = {
-                        IconButton(onClick = { navController.popBackStack() }) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Volver")
-                        }
-                    },
-                    // --- INICIO DE LA CORRECCIÓN 1: Botón para ir al Calendario ---
-                    actions = {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Panel de Control") },
+                navigationIcon = {
+                    IconButton(onClick = { navController.popBackStack() }) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Volver")
+                    }
+                },
+                actions = {
+                    uiState.task?.let { task ->
                         if (task.isFromCalendar && task.calendarEventId != null) {
                             IconButton(onClick = {
                                 val uri = ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, task.calendarEventId)
@@ -79,185 +63,149 @@ fun TaskDetailScreen(
                             }
                         }
                     }
-                    // --- FIN DE LA CORRECCIÓN 1 ---
-                )
-            }
-        ) { paddingValues ->
-            LazyColumn(
+                }
+            )
+        }
+    ) { paddingValues ->
+        uiState.task?.let { task ->
+            Column(
                 modifier = Modifier
                     .padding(paddingValues)
                     .fillMaxSize()
-                    .padding(horizontal = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                item { Spacer(modifier = Modifier.height(1.dp)) } // Spacer para el padding superior
-                item {
-                    TaskInfoCard(
-                        task = task,
-                        onLocationSelected = { context ->
-                            viewModel.updateTaskLocation(context)
-                        },
-                        onCustomTimeClicked = {
-                            showDialog = true
-                        }
-                    )
-                }
-                item {
-                    TaskControlPanel(
-                        task = task,
-                        onAcknowledge = { viewModel.acknowledgeTask() },
-                        onFinishOrReset = { viewModel.toggleFinishStatus() }
-                    )
-                }
-                item {
-                    OutlinedButton(
-                        onClick = { navController.popBackStack() },
-                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 16.dp)
-                    ) {
-                        Text("Volver")
-                    }
-                }
+                // 1. Panel de Información (Más compacto)
+                TaskHeader(task = task, viewModel = viewModel)
+
+                HorizontalDivider()
+
+                // 2. Panel de Interacción (Chat y Acciones)
+                TaskInteractionPanel(
+                    task = task,
+                    onAcknowledge = { viewModel.acknowledgeTask() },
+                    onFinishOrReset = { viewModel.toggleFinishStatus() },
+                    modifier = Modifier.weight(1f) // Ocupa el espacio restante
+                )
             }
+        } ?: Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator()
         }
-    } ?: Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        CircularProgressIndicator()
     }
 }
 
+// --- NUEVOS COMPONENTES VISUALES ---
+// Estos componentes reemplazan y rediseñan la antigua `TaskInfoCard`
+
 @Composable
-fun TaskInfoCard(
-    task: Task,
-    onLocationSelected: (String) -> Unit,
-    onCustomTimeClicked: () -> Unit
-) {
+private fun TaskHeader(task: Task, viewModel: TaskDetailViewModel) {
     val timeFormatter = DateTimeFormatter.ofPattern("HH:mm")
+    var showDialog by remember { mutableStateOf(false) }
 
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        elevation = CardDefaults.cardElevation(2.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = task.title,
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                    textDecoration = if (task.isFinished) TextDecoration.LineThrough else null,
-                    color = if (task.isFinished) Color.Gray else MaterialTheme.colorScheme.onSurface
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                if(task.isAcknowledged && !task.isFinished){
-                    Icon(
-                        imageVector = Icons.Default.CheckCircle,
-                        contentDescription = "Tarea Aceptada",
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
+    if (showDialog) {
+        CustomTravelTimeDialog(
+            task = task,
+            onDismiss = { showDialog = false },
+            onConfirm = { travelTime ->
+                viewModel.updateTaskLocation("custom", travelTime)
+                showDialog = false
             }
-
-            Spacer(modifier = Modifier.height(4.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = task.scheduledTime.format(timeFormatter),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                if (task.travelTimeMinutes > 0) {
-                    Spacer(modifier = Modifier.width(16.dp))
-                    Text(
-                        text = "Viaje: ${task.travelTimeMinutes * 2} min (total)",
-                        style = MaterialTheme.typography.bodySmall,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.secondary
-                    )
-                }
-            }
-            Spacer(modifier = Modifier.height(16.dp))
-            Text("¿Dónde es el evento?", style = MaterialTheme.typography.bodyMedium)
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // --- INICIO DE LA CORRECCIÓN 2: Botones de Distancia ---
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                // Usamos SpaceBetween para que se distribuyan uniformemente
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // Quitamos el .weight(1f) para que cada botón tome su tamaño natural
-                LocationButton("Ofi", task.locationContext == LocationContext.OFFICE, { onLocationSelected(LocationContext.OFFICE) })
-                LocationButton("Cerca", task.locationContext == LocationContext.NEARBY, { onLocationSelected(LocationContext.NEARBY) })
-                LocationButton("Lejos", task.locationContext == LocationContext.FAR, { onLocationSelected(LocationContext.FAR) })
-                IconButton(onClick = onCustomTimeClicked) {
-                    Icon(Icons.Default.Create, contentDescription = "Tiempo personalizado")
-                }
-            }
-            // --- FIN DE LA CORRECCIÓN 2 ---
-        }
+        )
     }
-}
 
-@Composable
-fun LocationButton(text: String, isSelected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    val backgroundColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent
-    val contentColor = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
-
-    // Usamos un OutlinedButton que se adapta mejor al contenido
-    OutlinedButton(
-        onClick = onClick,
-        modifier = modifier.height(48.dp),
-        shape = MaterialTheme.shapes.medium,
-        // Reducimos el padding horizontal para dar más espacio al texto
-        contentPadding = PaddingValues(horizontal = 12.dp),
-        colors = ButtonDefaults.outlinedButtonColors(containerColor = backgroundColor, contentColor = contentColor),
-        border = if (isSelected) null else BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha=0.5f))
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Text(text, maxLines = 1)
+        // Título y hora
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(
+                text = task.title,
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
+                textDecoration = if (task.isFinished) TextDecoration.LineThrough else null,
+                color = if (task.isFinished) Color.Gray else MaterialTheme.colorScheme.onSurface
+            )
+            if (task.isAcknowledged && !task.isFinished) {
+                Icon(
+                    imageVector = Icons.Default.CheckCircle,
+                    contentDescription = "Tarea Aceptada",
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+        }
+
+        // Fila de Información
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Icon(Icons.Default.Schedule, contentDescription = "Hora", tint = MaterialTheme.colorScheme.primary)
+            Text(
+                text = task.scheduledTime.format(timeFormatter),
+                style = MaterialTheme.typography.bodyLarge
+            )
+            if (task.travelTimeMinutes > 0) {
+                Text(
+                    text = "Viaje: ${task.travelTimeMinutes * 2} min (total)",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.secondary
+                )
+            }
+        }
+
+        // Selector de ubicación (usando Chips para un look más moderno)
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Icon(Icons.Default.LocationOn, contentDescription = "Ubicación", tint = MaterialTheme.colorScheme.primary)
+            LocationChip("Ofi", task.locationContext == LocationContext.OFFICE) { viewModel.updateTaskLocation(LocationContext.OFFICE) }
+            LocationChip("Cerca", task.locationContext == LocationContext.NEARBY) { viewModel.updateTaskLocation(LocationContext.NEARBY) }
+            LocationChip("Lejos", task.locationContext == LocationContext.FAR) { viewModel.updateTaskLocation(LocationContext.FAR) }
+            IconButton(onClick = { showDialog = true }, modifier = Modifier.size(32.dp)) {
+                Icon(Icons.Default.Create, contentDescription = "Tiempo personalizado")
+            }
+        }
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CustomTravelTimeDialog(
-    task: Task,
-    onDismiss: () -> Unit,
-    onConfirm: (Int) -> Unit
-) {
-    var textValue by remember { mutableStateOf(if (task.travelTimeMinutes > 0) task.travelTimeMinutes.toString() else "") }
+private fun LocationChip(text: String, isSelected: Boolean, onClick: () -> Unit) {
+    FilterChip(
+        selected = isSelected,
+        onClick = onClick,
+        label = { Text(text) },
+        leadingIcon = if (isSelected) {
+            { Icon(imageVector = Icons.Filled.Done, contentDescription = "Seleccionado", modifier = Modifier.size(FilterChipDefaults.IconSize)) }
+        } else {
+            null
+        },
+        shape = RoundedCornerShape(16.dp)
+    )
+}
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Tiempo de Viaje (Ida)") },
+// --- DIÁLOGO DE TIEMPO (Movido aquí) ---
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun CustomTravelTimeDialog(task: Task, onDismiss: () -> Unit, onConfirm: (Int) -> Unit) {
+    var textValue by remember { mutableStateOf(if (task.travelTimeMinutes > 0) task.travelTimeMinutes.toString() else "") }
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("Tiempo de Viaje (Ida)") },
         text = {
             Column {
                 Text("Ingresa los minutos de viaje solo de ida para '${task.title}'.")
                 Spacer(modifier = Modifier.height(16.dp))
-                OutlinedTextField(
-                    value = textValue,
-                    onValueChange = { textValue = it.filter { char -> char.isDigit() } },
-                    label = { Text("Minutos") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
+                OutlinedTextField(value = textValue, onValueChange = { textValue = it.filter { char -> char.isDigit() } }, label = { Text("Minutos") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, modifier = Modifier.fillMaxWidth())
             }
         },
-        confirmButton = {
-            Button(
-                onClick = {
-                    val minutes = textValue.toIntOrNull() ?: 0
-                    onConfirm(minutes)
-                },
-                enabled = textValue.isNotBlank()
-            ) {
-                Text("Confirmar")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancelar")
-            }
-        }
+        confirmButton = { Button(onClick = { onConfirm(textValue.toIntOrNull() ?: 0) }, enabled = textValue.isNotBlank()) { Text("Confirmar") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } }
     )
 }

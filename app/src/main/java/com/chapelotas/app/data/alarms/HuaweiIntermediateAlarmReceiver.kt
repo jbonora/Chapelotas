@@ -79,12 +79,14 @@ class HuaweiIntermediateAlarmReceiver : BroadcastReceiver() {
                     scope.launch {
                         try {
                             val settings = preferencesRepository.observeAppSettings().first()
+                            // --- INICIO DE LA CORRECCIÓN ---
+                            // Se elimina el parámetro 'minutesFromNow' que ya no existe.
                             alarmScheduler.scheduleAlarm(
-                                minutesFromNow = actualRemainingMinutes,
                                 alarmDate = finalAlarmDate,
                                 alarmTime = finalAlarmTime,
                                 settings = settings
                             )
+                            // --- FIN DE LA CORRECCIÓN ---
                             debugLog.add("HUAWEI_INTERMEDIATE: ✅ Alarma final reprogramada exitosamente")
                         } catch (e: Exception) {
                             debugLog.add("HUAWEI_INTERMEDIATE: ❌ Error reprogramando: ${e.message}")

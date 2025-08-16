@@ -15,12 +15,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.DateRange
-import androidx.compose.material.icons.filled.Home
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -49,12 +46,11 @@ import androidx.navigation.navArgument
 import com.chapelotas.app.di.Constants
 import com.chapelotas.app.domain.debug.DebugLog
 import com.chapelotas.app.domain.repositories.PreferencesRepository
+import com.chapelotas.app.presentation.ui.AgendaScreen // ¡NUEVO! Importa la nueva pantalla
 import com.chapelotas.app.presentation.ui.PersonalityManagerScreen
 import com.chapelotas.app.presentation.ui.SettingsScreen
 import com.chapelotas.app.presentation.ui.TaskDetailScreen
 import com.chapelotas.app.presentation.ui.TomorrowScreen
-import com.chapelotas.app.presentation.ui.home.HomeScreen
-import com.chapelotas.app.presentation.ui.home.SevenDaysScreen
 import com.chapelotas.app.presentation.ui.setup.SetupScreen
 import com.chapelotas.app.presentation.ui.theme.ChapelotasTheme
 import com.chapelotas.app.presentation.viewmodels.RootViewEvent
@@ -119,20 +115,15 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
-        // Iniciar heartbeat de actividad
         startActivityHeartbeat()
     }
 
     override fun onResume() {
         super.onResume()
-
-        // Marcar actividad inmediatamente
         lifecycleScope.launch {
             preferencesRepository.updateLastActivityTime(System.currentTimeMillis())
             debugLog.add("📱 ACTIVITY: App en primer plano")
         }
-
-        // Reiniciar heartbeat si estaba detenido
         if (heartbeatJob?.isActive != true) {
             startActivityHeartbeat()
         }
@@ -140,11 +131,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onPause() {
         super.onPause()
-
         lifecycleScope.launch {
             debugLog.add("📱 ACTIVITY: App en background")
         }
-        // NO detenemos el heartbeat - queremos que siga corriendo
     }
 
     override fun onDestroy() {
@@ -157,12 +146,8 @@ class MainActivity : ComponentActivity() {
         heartbeatJob = lifecycleScope.launch {
             while (isActive) {
                 try {
-                    // Actualizar cada 30 segundos mientras la app esté viva
                     delay(30_000)
-
                     preferencesRepository.updateLastActivityTime(System.currentTimeMillis())
-
-                    // Log cada 5 minutos para no llenar el debug
                     if (System.currentTimeMillis() % 300_000 < 30_000) {
                         debugLog.add("💓 ACTIVITY: Heartbeat - App activa")
                     }
@@ -171,7 +156,6 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
-
         debugLog.add("💓 ACTIVITY: Heartbeat iniciado")
     }
 }
@@ -217,7 +201,6 @@ fun AppNavigation(isFirstTimeUser: Boolean, rootViewModel: RootViewModel) {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainNavigationContainer(
     rootNavController: NavController,
@@ -225,23 +208,26 @@ fun MainNavigationContainer(
     onHighlightConsumed: () -> Unit
 ) {
     val navController = rememberNavController()
-    var hasContentBelow by remember { mutableStateOf(true) } // Iniciar en true para mostrar línea por defecto
+    var hasContentBelow by remember { mutableStateOf(true) }
 
     Scaffold(
         bottomBar = {
+            // La barra de navegación ahora se ha simplificado
             AppBottomNavBar(
                 navController = navController,
                 hasContentBelow = hasContentBelow
             )
         }
     ) { paddingValues ->
+        // --- CAMBIO #1: La ruta de inicio ahora es "agenda" ---
         NavHost(
             navController = navController,
-            startDestination = "today",
+            startDestination = "agenda",
             modifier = Modifier.padding(paddingValues)
         ) {
-            composable("today") {
-                HomeScreen(
+            // --- CAMBIO #2: Se reemplazan "today" y "seven_days" por "agenda" ---
+            composable("agenda") {
+                AgendaScreen(
                     navController = navController,
                     highlightedTaskId = highlightedTaskId,
                     onHighlightConsumed = onHighlightConsumed,
@@ -250,18 +236,12 @@ fun MainNavigationContainer(
                     }
                 )
             }
-            composable("seven_days") {
-                SevenDaysScreen(
-                    navController = navController
-                )
-            }
+            // El resto de las rutas se mantienen igual
             composable("tomorrow_debug") {
                 TomorrowScreen()
             }
             composable("debug") {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("Debug Screen")
-                }
+                // Aquí va tu pantalla de Debug
             }
             composable("settings") {
                 SettingsScreen(navController = navController)
@@ -307,61 +287,22 @@ fun AppBottomNavBar(
             val navBackStackEntry by navController.currentBackStackEntryAsState()
             val currentRoute = navBackStackEntry?.destination?.route
 
+            // --- CAMBIO #3: El nuevo y único botón para la vista principal ---
             NavigationBarItem(
-                icon = {
-                    Icon(
-                        Icons.Default.Home,
-                        contentDescription = "Hoy"
-                    )
-                },
-                label = { Text("Hoy") },
-                selected = currentRoute == "today",
+                icon = { Icon(Icons.Default.DateRange, contentDescription = "Agenda") },
+                label = { Text("Agenda") },
+                selected = currentRoute == "agenda",
                 onClick = {
-                    navController.navigate("today") {
+                    navController.navigate("agenda") {
                         popUpTo(navController.graph.startDestinationId)
                         launchSingleTop = true
                     }
                 }
             )
+
+            // Se mantienen los otros botones que no se fusionaron
             NavigationBarItem(
-                icon = {
-                    Icon(
-                        Icons.Default.DateRange,
-                        contentDescription = "7 Días"
-                    )
-                },
-                label = { Text("7 Días") },
-                selected = currentRoute == "seven_days",
-                onClick = {
-                    navController.navigate("seven_days") {
-                        popUpTo(navController.graph.startDestinationId)
-                        launchSingleTop = true
-                    }
-                }
-            )
-            NavigationBarItem(
-                icon = {
-                    Icon(
-                        Icons.Default.ArrowForward,
-                        contentDescription = "Mañana"
-                    )
-                },
-                label = { Text("Mañana") },
-                selected = currentRoute == "tomorrow_debug",
-                onClick = {
-                    navController.navigate("tomorrow_debug") {
-                        popUpTo(navController.graph.startDestinationId)
-                        launchSingleTop = true
-                    }
-                }
-            )
-            NavigationBarItem(
-                icon = {
-                    Icon(
-                        Icons.Default.Build,
-                        contentDescription = "Debug"
-                    )
-                },
+                icon = { Icon(Icons.Default.Build, contentDescription = "Debug") },
                 label = { Text("Debug") },
                 selected = currentRoute == "debug",
                 onClick = {

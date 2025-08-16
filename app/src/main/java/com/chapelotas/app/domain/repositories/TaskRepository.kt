@@ -30,7 +30,11 @@ interface TaskRepository {
     suspend fun recordReminderSent(taskId: String, nextReminderTime: LocalDateTime?)
     suspend fun updateInitialReminderState(taskId: String, reminderCount: Int, nextReminderAt: LocalDateTime?)
 
-    suspend fun syncWithCalendarEvents(events: List<CalendarEvent>): List<Task>
+    suspend fun syncWithCalendarEvents(
+        events: List<CalendarEvent>,
+        startDate: LocalDate,
+        endDate: LocalDate
+    ): List<Task>
     suspend fun cleanOldCompletedTasks(daysToKeep: Int = 7)
 
     suspend fun deleteOutdatedUnfinishedTasks()

@@ -20,6 +20,7 @@ object Constants {
     const val ACTION_START_MONITORING = "com.chapelotas.action.START_MONITORING"
     const val ACTION_TRIGGER_REMINDER = "com.chapelotas.action.TRIGGER_REMINDER"
     const val ACTION_ACKNOWLEDGE = "com.chapelotas.action.ACKNOWLEDGE"
+    const val ACTION_SHOW_TASK_DETAILS = "com.chapelotas.action.SHOW_TASK_DETAILS"
     const val ACTION_FINISH_DONE = "com.chapelotas.action.FINISH_DONE"
 
     // --- Intent Extras ---

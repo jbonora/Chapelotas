@@ -26,7 +26,7 @@ import kotlinx.coroutines.withContext
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
-import java.time.ZonedDateTime
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
 import javax.inject.Inject
@@ -70,13 +70,10 @@ class AlarmSchedulerUseCase @Inject constructor(
             return
         }
 
-        val today = LocalDate.now()
+        val now = LocalDateTime.now()
+        val today = now.toLocalDate()
         val tasksToday = taskRepository.observeTasksForDate(today).first()
         val tasksTomorrow = taskRepository.observeTasksForDate(today.plusDays(1)).first()
-
-        val allUpcomingTasks = (tasksToday + tasksTomorrow)
-            .filter { it.scheduledTime.isAfter(LocalDateTime.now()) }
-            .sortedBy { it.scheduledTime }
 
         val workStartTime = try {
             LocalTime.parse(settings.workStartTime)
@@ -84,36 +81,50 @@ class AlarmSchedulerUseCase @Inject constructor(
             DEFAULT_WORK_START_TIME
         }
 
-        val nextTaskTime = allUpcomingTasks.firstOrNull()?.scheduledTime?.toLocalTime()
-        val firstEventTime = if (nextTaskTime != null && nextTaskTime.isBefore(workStartTime)) {
-            nextTaskTime
+        // --- INICIO DE LA LÓGICA CORREGIDA ---
+
+        // 1. Encontrar la próxima tarea, manteniendo su fecha y hora completas.
+        val nextUpcomingTask = (tasksToday + tasksTomorrow)
+            .filter { it.scheduledTime.isAfter(now) }
+            .minByOrNull { it.scheduledTime }
+
+        // 2. Determinar la referencia para el inicio de la jornada (¿es hoy o mañana?).
+        val workStartReference = if (now.toLocalTime().isBefore(workStartTime)) {
+            // Si es antes de la hora de inicio laboral, la referencia es la jornada de hoy.
+            today.atTime(workStartTime)
         } else {
-            workStartTime
+            // Si ya pasó la hora de inicio, la referencia es la jornada de mañana.
+            today.plusDays(1).atTime(workStartTime)
         }
 
-        val alarmTime = firstEventTime.minusMinutes(settings.alarmOffsetMinutes.toLong())
-
-        val now = LocalDateTime.now().withSecond(0).withNano(0)
-        var targetDateTime = now.toLocalDate().atTime(alarmTime)
-
-        if (targetDateTime.isBefore(now)) {
-            targetDateTime = targetDateTime.plusDays(1)
+        // 3. Decidir el evento de referencia final: la tarea más próxima o el inicio de la jornada.
+        val referenceEventDateTime = if (nextUpcomingTask != null && nextUpcomingTask.scheduledTime.isBefore(workStartReference)) {
+            // Si hay una tarea y es ANTES que nuestra referencia de jornada, la tarea gana.
+            debugLog.add("SCHEDULER: Usando próxima tarea como referencia: ${nextUpcomingTask.scheduledTime}")
+            nextUpcomingTask.scheduledTime
+        } else {
+            // Si no, usamos la referencia de la jornada que calculamos antes.
+            debugLog.add("SCHEDULER: Usando inicio de jornada como referencia: $workStartReference")
+            workStartReference
         }
 
-        val minutesUntilAlarm = ChronoUnit.MINUTES.between(now, targetDateTime)
+        // 4. Calcular la hora final de la alarma restando el tiempo de antelación.
+        val finalAlarmDateTime = referenceEventDateTime.minusMinutes(settings.alarmOffsetMinutes.toLong())
 
-        debugLog.add("SCHEDULER: ⏰ La alarma sonará en ${minutesUntilAlarm} minutos.")
+        // --- FIN DE LA LÓGICA CORREGIDA ---
+
+        val minutesUntilAlarm = ChronoUnit.MINUTES.between(now, finalAlarmDateTime)
+
+        debugLog.add("SCHEDULER: ⏰ La alarma sonará a las ${finalAlarmDateTime.toLocalTime()} (en ${minutesUntilAlarm} minutos).")
 
         scheduleAlarm(
-            minutesFromNow = minutesUntilAlarm,
-            alarmDate = targetDateTime.toLocalDate(),
-            alarmTime = targetDateTime.toLocalTime(),
+            alarmDate = finalAlarmDateTime.toLocalDate(),
+            alarmTime = finalAlarmDateTime.toLocalTime(),
             settings = settings
         )
     }
 
     suspend fun scheduleAlarm(
-        minutesFromNow: Long,
         alarmDate: LocalDate,
         alarmTime: LocalTime,
         settings: AppSettings
@@ -121,6 +132,9 @@ class AlarmSchedulerUseCase @Inject constructor(
         if (alarmManager == null || (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !alarmManager.canScheduleExactAlarms())) {
             return
         }
+
+        val targetDateTime = LocalDateTime.of(alarmDate, alarmTime)
+        val minutesFromNow = ChronoUnit.MINUTES.between(LocalDateTime.now(), targetDateTime)
 
         preferencesRepository.clearFinalHuaweiAlarmTime()
 
@@ -131,7 +145,10 @@ class AlarmSchedulerUseCase @Inject constructor(
 
         cancelPreviousAlarm()
 
-        val triggerTimeMillis = System.currentTimeMillis() - (System.currentTimeMillis() % 60000) + (minutesFromNow * 60 * 1000)
+        // --- CÁLCULO DE TIEMPO MEJORADO ---
+        // Se convierte la fecha y hora objetivo directamente a milisegundos.
+        // Es más robusto y menos propenso a errores.
+        val triggerTimeMillis = targetDateTime.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
 
         val alarmIntent = Intent(context, AlarmReceiver::class.java).apply {
             putExtra("alarm_date", alarmDate.toString())
